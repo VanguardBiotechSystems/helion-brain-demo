@@ -1,0 +1,23 @@
+# Dependencias
+node_modules/
+
+# Build de Next.js
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# Entorno — NUNCA commitear claves reales
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Plataformas
+.vercel
+
+# Sistema
+.DS_Store
+npm-debug.log*
+coverage/
