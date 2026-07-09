@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, verifyAccessToken } from "@/lib/server/access";
 import { readEnv } from "@/lib/server/env";
-import { getTtsProvider } from "@/lib/server/tts";
+import { clampTtsText, getTtsProvider } from "@/lib/server/tts";
 import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
 
 export const dynamic = "force-dynamic";
@@ -30,8 +30,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const ip = clientIpFrom(request.headers);
-  const { allowed, retryAfterMs } = getLimiter("tts", 60, 10 * 60 * 1000).check(ip);
+  // Clave por sesión de acceso (no por IP): varias personas tras el mismo
+  // NAT no se roban la cuota, y una conversación fluida (una síntesis por
+  // turno) cabe de sobra en el límite.
+  const limiterKey = token ? `tk:${token.slice(-24)}` : `ip:${clientIpFrom(request.headers)}`;
+  const { allowed, retryAfterMs } = getLimiter("tts", 120, 10 * 60 * 1000).check(limiterKey);
   if (!allowed) {
     return NextResponse.json(
       { error: { code: "rate_limited", message: "Demasiadas peticiones de voz en poco tiempo." } },
@@ -53,13 +56,17 @@ export async function POST(request: NextRequest) {
   }
 
   const body = (await request.json().catch(() => null)) as { text?: unknown } | null;
-  const text = typeof body?.text === "string" ? body.text.trim() : "";
-  if (!text || text.length > MAX_TTS_CHARS) {
+  const rawText = typeof body?.text === "string" ? body.text.trim() : "";
+  if (!rawText) {
     return NextResponse.json(
-      { error: { code: "unknown", message: "El texto a sintetizar no es válido." } },
+      { error: { code: "tts_failed", message: "El texto a sintetizar está vacío." } },
       { status: 400 },
     );
   }
+
+  // Las respuestas largas se recortan en frase: mejor una voz que termina
+  // antes que un robot mudo con un banner de error.
+  const text = clampTtsText(rawText, MAX_TTS_CHARS);
 
   const result = await provider.synthesize(text);
   if (!result.ok) {

@@ -46,7 +46,8 @@ const TTS_OUTPUT_RULES = `
 # Salida por voz externa (modo TTS)
 - Tu texto se convierte en voz con un sintetizador externo: escribe EXACTAMENTE lo que debe decirse en voz alta, y nada más.
 - Prohibido el formato: nada de markdown, negritas, emojis, listas, encabezados ni acotaciones entre paréntesis o asteriscos.
-- Escribe los números, horas y siglas tal y como se pronuncian cuando pueda haber ambigüedad (p. ej. "las tres y media", "uve pe ene").`;
+- Escribe los números, horas y siglas tal y como se pronuncian cuando pueda haber ambigüedad (p. ej. "las tres y media", "uve pe ene").
+- Brevedad estricta: como norma, cuatro o cinco frases como máximo por respuesta. Si el tema da para más, resume y ofrece continuar ("¿quieres que siga?").`;
 
 export function buildAgentInstructions(
   agentName: string,

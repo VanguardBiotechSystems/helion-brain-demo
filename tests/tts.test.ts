@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ElevenLabsTtsProvider } from "@/lib/server/tts";
+import { ElevenLabsTtsProvider, clampTtsText } from "@/lib/server/tts";
 
 function audioResponse(bytes = 3): Response {
   return new Response(new Uint8Array(bytes).fill(1), {
@@ -105,5 +105,25 @@ describe("ElevenLabsTtsProvider", () => {
     vi.stubGlobal("fetch", vi.fn(async () => audioResponse(0)));
     const result = await provider().synthesize("Hola");
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("clampTtsText", () => {
+  it("no toca textos dentro del límite", () => {
+    expect(clampTtsText("Hola, ¿qué tal?", 100)).toBe("Hola, ¿qué tal?");
+  });
+
+  it("recorta en el último final de frase dentro del límite", () => {
+    const text = "Primera frase completa. Segunda frase completa. Tercera que no cabe entera";
+    const clamped = clampTtsText(text, 55);
+    expect(clamped).toBe("Primera frase completa. Segunda frase completa.");
+  });
+
+  it("recorta en espacio con elipsis si no hay final de frase utilizable", () => {
+    const text = "palabra ".repeat(40).trim();
+    const clamped = clampTtsText(text, 50);
+    expect(clamped.length).toBeLessThanOrEqual(51);
+    expect(clamped.endsWith("…")).toBe(true);
+    expect(clamped).not.toContain("palabr…"); // no corta a mitad de palabra
   });
 });

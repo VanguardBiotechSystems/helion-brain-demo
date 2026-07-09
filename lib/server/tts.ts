@@ -27,6 +27,30 @@ export interface TtsProvider {
   synthesize(text: string, options?: TtsOptions): Promise<TtsResult>;
 }
 
+/**
+ * Recorta el texto a sintetizar sin dejar al agente mudo: corta en el último
+ * final de frase dentro del límite (o en el último espacio como último
+ * recurso). Los subtítulos siempre muestran el texto completo.
+ */
+export function clampTtsText(text: string, maxChars: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+
+  const slice = trimmed.slice(0, maxChars);
+  const sentenceEnd = Math.max(
+    slice.lastIndexOf(". "),
+    slice.lastIndexOf("! "),
+    slice.lastIndexOf("? "),
+    slice.lastIndexOf(".\n"),
+    slice.lastIndexOf("…"),
+  );
+  if (sentenceEnd > maxChars * 0.4) {
+    return slice.slice(0, sentenceEnd + 1).trim();
+  }
+  const lastSpace = slice.lastIndexOf(" ");
+  return `${(lastSpace > 0 ? slice.slice(0, lastSpace) : slice).trim()}…`;
+}
+
 function contentTypeFor(outputFormat: string): string {
   if (outputFormat.startsWith("mp3")) return "audio/mpeg";
   if (outputFormat.startsWith("opus")) return "audio/ogg";

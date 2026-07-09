@@ -166,6 +166,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   const textBufferRef = useRef(new Map<string, string>());
   const ttsUrlRef = useRef<string | null>(null);
   const ttsStreamRef = useRef<MediaStream | null>(null);
+  // Contador de generación: cualquier cancelación (barge-in, cortar voz,
+  // reconexión) o una síntesis más nueva invalida las síntesis en vuelo.
+  const ttsEpochRef = useRef(0);
   const logRef = useRef(log);
 
   logRef.current = log;
@@ -228,6 +231,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       URL.revokeObjectURL(ttsUrlRef.current);
       ttsUrlRef.current = null;
     }
+    ttsEpochRef.current += 1;
     ttsStreamRef.current = null;
     textBufferRef.current.clear();
     setAgentStream(null);
@@ -259,8 +263,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     }
   }, []);
 
-  /** Detiene la reproducción TTS local (solo hace algo en modo elevenlabs). */
+  /** Detiene la reproducción TTS local e invalida las síntesis en vuelo. */
   const stopTtsPlayback = useCallback(() => {
+    ttsEpochRef.current += 1;
     if (engineRef.current !== "elevenlabs") return;
     const element = audioRef.current;
     if (element) {
@@ -281,6 +286,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   const playTtsAudio = useCallback(
     async (text: string) => {
       if (engineRef.current !== "elevenlabs" || !text.trim()) return;
+      // La síntesis más nueva invalida cualquier otra en vuelo; si durante
+      // los await el usuario interrumpe/corta/reconecta, se descarta.
+      const epoch = ++ttsEpochRef.current;
       try {
         setStatusSafe("thinking"); // preparando voz
         const response = await fetch("/api/tts", {
@@ -289,6 +297,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           body: JSON.stringify({ text }),
           signal: requestTimeoutSignal(20000),
         });
+        if (ttsEpochRef.current !== epoch) return;
         if (!response.ok) {
           const body = (await response.json().catch(() => null)) as ApiErrorBody | null;
           const code = body?.error?.code;
@@ -297,6 +306,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           return;
         }
         const blob = await response.blob();
+        if (ttsEpochRef.current !== epoch) return;
         const element = ensureAudioElement();
         element.pause();
         if (ttsUrlRef.current) URL.revokeObjectURL(ttsUrlRef.current);
@@ -323,9 +333,15 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           }
         }
         await element.play();
+        if (ttsEpochRef.current !== epoch) {
+          element.pause();
+          return;
+        }
         recordLatency();
         setStatusSafe("speaking");
       } catch (caught) {
+        // Una síntesis invalidada (p. ej. pause() durante play()) no es un error.
+        if (ttsEpochRef.current !== epoch) return;
         if (caught instanceof DOMException && caught.name === "NotAllowedError") {
           setError(toAppError("audio_playback"));
         } else {
