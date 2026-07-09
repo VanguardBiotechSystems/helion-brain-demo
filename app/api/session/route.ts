@@ -52,8 +52,9 @@ export async function POST(request: NextRequest) {
     clientSecret: result.clientSecret,
     expiresAt: result.expiresAt,
     model: result.model,
-    voice: result.voice,
+    voice: env.voiceEngine === "elevenlabs" ? env.elevenLabsVoiceId : result.voice,
     agentName: result.agentName,
     baseUrl: env.openaiBaseUrl,
+    voiceEngine: env.voiceEngine,
   });
 }

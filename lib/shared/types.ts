@@ -27,10 +27,14 @@ export interface TranscriptEntry {
   action?: RobotActionInfo;
 }
 
+/** Motor que genera la voz del agente. */
+export type VoiceEngine = "openai_realtime" | "elevenlabs";
+
 export interface SessionInfo {
   model: string;
   voice: string;
   agentName: string;
+  engine: VoiceEngine;
 }
 
 /** Respuesta de POST /api/session (sin datos sensibles más allá del token efímero). */
@@ -41,4 +45,5 @@ export interface SessionResponse {
   voice: string;
   agentName: string;
   baseUrl: string;
+  voiceEngine: VoiceEngine;
 }

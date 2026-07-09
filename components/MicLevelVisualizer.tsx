@@ -73,10 +73,12 @@ export default function MicLevelVisualizer({
       const cy = size / 2;
       const baseRadius = size * 0.27;
 
-      // Nivel objetivo según estado.
+      // Nivel objetivo según estado. Al hablar, si no hay analizador del
+      // stream del agente (p. ej. TTS en Safari), late con un pulso base.
       let target = 0;
       if (current === "listening") target = micLevelRef.current ?? 0;
-      else if (current === "speaking") target = agentLevelRef.current ?? 0;
+      else if (current === "speaking")
+        target = Math.max(agentLevelRef.current ?? 0, 0.16 + 0.12 * Math.sin(t * 3.4));
       else if (current === "thinking") target = 0.25 + 0.2 * Math.sin(t * 3.1);
       else if (current === "connecting" || current === "requesting_mic" || current === "reconnecting")
         target = 0.15 + 0.12 * Math.sin(t * 2.2);

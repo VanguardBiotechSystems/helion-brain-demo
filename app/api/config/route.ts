@@ -29,9 +29,13 @@ export async function GET(request: NextRequest) {
     appName: env.appName,
     agentName: env.agentName,
     model: env.realtimeModel,
-    voice: env.realtimeVoice,
+    voice: env.voiceEngine === "elevenlabs" ? env.elevenLabsVoiceId : env.realtimeVoice,
     turnDetection: env.turnDetection,
     transcriptionModel: env.transcriptionModel,
     textModel: env.textModel,
+    voiceEngine: env.voiceEngine,
+    elevenLabsConfigured: Boolean(env.elevenLabsApiKey && env.elevenLabsVoiceId),
+    elevenLabsVoiceId: env.elevenLabsVoiceId || null,
+    elevenLabsModel: env.elevenLabsModel,
   });
 }

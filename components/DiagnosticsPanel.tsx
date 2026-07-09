@@ -26,6 +26,10 @@ interface ServerConfig {
   turnDetection?: string;
   transcriptionModel?: string;
   textModel?: string;
+  voiceEngine?: string;
+  elevenLabsConfigured?: boolean;
+  elevenLabsVoiceId?: string | null;
+  elevenLabsModel?: string;
 }
 
 /**
@@ -43,6 +47,38 @@ export default function DiagnosticsPanel({
 }) {
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [browserInfo, setBrowserInfo] = useState({ userAgent: "", webrtc: false, online: true });
+  const [voiceTest, setVoiceTest] = useState<{ state: "idle" | "loading" | "playing" | "error"; message: string }>({
+    state: "idle",
+    message: "",
+  });
+
+  async function handleVoiceTest() {
+    setVoiceTest({ state: "loading", message: "" });
+    try {
+      const response = await fetch("/api/voice/test");
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null;
+        setVoiceTest({
+          state: "error",
+          message: body?.error?.message ?? "No se pudo generar la voz de prueba.",
+        });
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setVoiceTest({ state: "idle", message: "" });
+      };
+      await audio.play();
+      setVoiceTest({ state: "playing", message: "" });
+    } catch {
+      setVoiceTest({ state: "error", message: "No se pudo reproducir el audio de prueba." });
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -91,9 +127,13 @@ export default function DiagnosticsPanel({
     recommendations.push("Sin incidencias detectadas.");
   }
 
+  const engine = data.sessionInfo?.engine ?? config?.voiceEngine ?? "—";
+
   const rows: Array<[string, string]> = [
     ["Modelo realtime", model],
+    ["Motor de voz", engine],
     ["Voz", voice],
+    ["ElevenLabs", config?.elevenLabsConfigured ? `configurado (${config?.elevenLabsModel ?? "—"})` : "sin configurar"],
     ["Detección de turnos", config?.turnDetection ?? "—"],
     ["Transcripción", config?.transcriptionModel ?? "—"],
     ["Modelo texto (fallback)", config?.textModel ?? "—"],
@@ -132,6 +172,25 @@ export default function DiagnosticsPanel({
             </div>
           ))}
         </dl>
+
+        <h3 className="diag-subtitle">Prueba de voz española</h3>
+        <p className="diag-note">
+          Genera y reproduce con ElevenLabs una frase fija en castellano para comprobar si la voz
+          suena nativa. Requiere <code>ELEVENLABS_API_KEY</code> y <code>ELEVENLABS_VOICE_ID</code>;
+          funciona aunque el motor activo sea <code>openai_realtime</code>.
+        </p>
+        <button
+          className="btn btn-small"
+          onClick={() => void handleVoiceTest()}
+          disabled={voiceTest.state === "loading" || voiceTest.state === "playing"}
+        >
+          {voiceTest.state === "loading"
+            ? "Generando voz…"
+            : voiceTest.state === "playing"
+              ? "Reproduciendo…"
+              : "▶ Probar voz española"}
+        </button>
+        {voiceTest.state === "error" && <p className="diag-test-error">{voiceTest.message}</p>}
 
         <h3 className="diag-subtitle">Recomendaciones</h3>
         <ul className="diag-recos">

@@ -28,12 +28,39 @@ describe("readEnv", () => {
     const { env } = readEnv(BASE);
     expect(env).not.toBeNull();
     expect(env!.realtimeModel).toBe("gpt-realtime-2.1");
-    expect(env!.realtimeVoice).toBe("marin");
+    expect(env!.realtimeVoice).toBe("cedar");
     expect(env!.turnDetection).toBe("semantic_vad");
     expect(env!.transcriptionLanguage).toBe("es");
     expect(env!.agentName).toBe("Atlas");
     expect(env!.appName).toBe("Helion");
     expect(env!.openaiBaseUrl).toBe("https://api.openai.com");
+    expect(env!.voiceEngine).toBe("openai_realtime");
+    expect(env!.elevenLabsModel).toBe("eleven_flash_v2_5");
+    expect(env!.elevenLabsOutputFormat).toBe("mp3_44100_128");
+  });
+
+  it("VOICE_ENGINE=elevenlabs exige las credenciales de ElevenLabs", () => {
+    const { env, missing } = readEnv({ ...BASE, VOICE_ENGINE: "elevenlabs" });
+    expect(env).toBeNull();
+    expect(missing).toEqual(["ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"]);
+  });
+
+  it("modo elevenlabs completo queda configurado", () => {
+    const { env } = readEnv({
+      ...BASE,
+      VOICE_ENGINE: "elevenlabs",
+      ELEVENLABS_API_KEY: "clave-el-1234",
+      ELEVENLABS_VOICE_ID: "voz-es-123",
+    });
+    expect(env).not.toBeNull();
+    expect(env!.voiceEngine).toBe("elevenlabs");
+    expect(env!.elevenLabsApiKey).toBe("clave-el-1234");
+    expect(env!.elevenLabsVoiceId).toBe("voz-es-123");
+  });
+
+  it("valores no válidos de VOICE_ENGINE caen a openai_realtime", () => {
+    const { env } = readEnv({ ...BASE, VOICE_ENGINE: "google_tts" });
+    expect(env!.voiceEngine).toBe("openai_realtime");
   });
 
   it("respeta los overrides", () => {

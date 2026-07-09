@@ -20,6 +20,7 @@ export type ErrorCode =
   | "network_offline"
   | "webrtc_failed"
   | "openai_error"
+  | "tts_failed"
   | "unknown";
 
 export interface AppError {
@@ -88,6 +89,10 @@ export const ERROR_COPY: Record<ErrorCode, { message: string; hint?: string }> =
   openai_error: {
     message: "OpenAI ha devuelto un error inesperado.",
     hint: "Vuelve a intentarlo en unos segundos.",
+  },
+  tts_failed: {
+    message: "No se pudo generar la voz española externa.",
+    hint: "Revisa ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID y la cuota de tu cuenta de ElevenLabs.",
   },
   unknown: {
     message: "Ha ocurrido un error inesperado.",

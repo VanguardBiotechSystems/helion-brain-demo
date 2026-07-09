@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toAppError, type AppError, type ErrorCode } from "@/lib/shared/errors";
-import type { AgentStatus, SessionInfo, SessionResponse } from "@/lib/shared/types";
+import type { AgentStatus, SessionInfo, SessionResponse, VoiceEngine } from "@/lib/shared/types";
 import { mockRobot } from "@/lib/robot/mockAdapter";
 import type { RobotCommand } from "@/lib/robot/types";
 import {
@@ -31,12 +31,14 @@ interface RealtimeServerEvent {
   item_id?: string;
   delta?: string;
   transcript?: string;
+  text?: string;
   response_id?: string;
   name?: string;
   call_id?: string;
   arguments?: string;
   response?: {
     id?: string;
+    status?: string;
     output?: Array<{ type?: string; name?: string; call_id?: string; arguments?: string }>;
   };
   error?: { type?: string; code?: string; message?: string };
@@ -107,6 +109,7 @@ function isKnownErrorCode(code: unknown): code is ErrorCode {
       "model_unavailable",
       "quota_exceeded",
       "openai_error",
+      "tts_failed",
     ].includes(code)
   );
 }
@@ -158,6 +161,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const speechStoppedAtRef = useRef<number | null>(null);
   const processedCallsRef = useRef(new Set<string>());
+  // Motor de voz de la sesión activa y estado del pipeline TTS (elevenlabs).
+  const engineRef = useRef<VoiceEngine>("openai_realtime");
+  const textBufferRef = useRef(new Map<string, string>());
+  const ttsUrlRef = useRef<string | null>(null);
+  const ttsStreamRef = useRef<MediaStream | null>(null);
   const logRef = useRef(log);
 
   logRef.current = log;
@@ -212,8 +220,16 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       }
     }
     if (audioRef.current) {
+      audioRef.current.pause();
       audioRef.current.srcObject = null;
+      audioRef.current.removeAttribute("src");
     }
+    if (ttsUrlRef.current) {
+      URL.revokeObjectURL(ttsUrlRef.current);
+      ttsUrlRef.current = null;
+    }
+    ttsStreamRef.current = null;
+    textBufferRef.current.clear();
     setAgentStream(null);
     setDataChannelState("closed");
     setConnectionState("closed");
@@ -242,6 +258,94 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       speechStoppedAtRef.current = null;
     }
   }, []);
+
+  /** Detiene la reproducción TTS local (solo hace algo en modo elevenlabs). */
+  const stopTtsPlayback = useCallback(() => {
+    if (engineRef.current !== "elevenlabs") return;
+    const element = audioRef.current;
+    if (element) {
+      try {
+        element.pause();
+        element.removeAttribute("src");
+      } catch {
+        // sin reproducción activa
+      }
+    }
+    if (ttsUrlRef.current) {
+      URL.revokeObjectURL(ttsUrlRef.current);
+      ttsUrlRef.current = null;
+    }
+  }, []);
+
+  /** Modo elevenlabs: sintetiza la respuesta en servidor y la reproduce. */
+  const playTtsAudio = useCallback(
+    async (text: string) => {
+      if (engineRef.current !== "elevenlabs" || !text.trim()) return;
+      try {
+        setStatusSafe("thinking"); // preparando voz
+        const response = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+          signal: requestTimeoutSignal(20000),
+        });
+        if (!response.ok) {
+          const body = (await response.json().catch(() => null)) as ApiErrorBody | null;
+          const code = body?.error?.code;
+          setError(toAppError(isKnownErrorCode(code) ? code : "tts_failed", body?.error?.message));
+          setStatusSafe("listening");
+          return;
+        }
+        const blob = await response.blob();
+        const element = ensureAudioElement();
+        element.pause();
+        if (ttsUrlRef.current) URL.revokeObjectURL(ttsUrlRef.current);
+        const url = URL.createObjectURL(blob);
+        ttsUrlRef.current = url;
+        element.srcObject = null;
+        element.src = url;
+        element.onended = () => setStatusSafe("listening");
+        // Nivel de voz para el orbe: captura el stream del elemento si el
+        // navegador lo soporta (si no, el orbe anima por estado).
+        if (!ttsStreamRef.current) {
+          const capturable = element as HTMLAudioElement & {
+            captureStream?: () => MediaStream;
+            mozCaptureStream?: () => MediaStream;
+          };
+          const capture = capturable.captureStream ?? capturable.mozCaptureStream;
+          if (capture) {
+            try {
+              ttsStreamRef.current = capture.call(element);
+              setAgentStream(ttsStreamRef.current);
+            } catch {
+              // sin analizador: no es fatal
+            }
+          }
+        }
+        await element.play();
+        recordLatency();
+        setStatusSafe("speaking");
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === "NotAllowedError") {
+          setError(toAppError("audio_playback"));
+        } else {
+          setError(toAppError("tts_failed"));
+        }
+        setStatusSafe("listening");
+      }
+    },
+    [ensureAudioElement, recordLatency, setStatusSafe],
+  );
+
+  /** Cancela la respuesta activa (generación y audio) sea cual sea el motor. */
+  const cancelActiveResponse = useCallback(() => {
+    sendEvent({ type: "response.cancel" });
+    if (engineRef.current === "elevenlabs") {
+      stopTtsPlayback();
+    } else {
+      sendEvent({ type: "output_audio_buffer.clear" });
+    }
+  }, [sendEvent, stopTtsPlayback]);
 
   const handleFunctionCall = useCallback(
     async (name: string | undefined, callId: string | undefined, argsJson: string | undefined) => {
@@ -304,6 +408,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       switch (event.type) {
         case "input_audio_buffer.speech_started":
           speechStoppedAtRef.current = null;
+          // Barge-in: si la voz TTS local está sonando, se corta al hablar.
+          stopTtsPlayback();
           setStatusSafe("listening");
           break;
 
@@ -343,6 +449,27 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           if (event.response_id) logRef.current.finalizeAgent(event.response_id, event.transcript);
           break;
 
+        // Modo elevenlabs: la respuesta llega como texto (se sintetiza al
+        // completarse, en response.done).
+        case "response.output_text.delta":
+          if (event.response_id && typeof event.delta === "string") {
+            logRef.current.appendAgent(event.response_id, event.delta);
+            textBufferRef.current.set(
+              event.response_id,
+              (textBufferRef.current.get(event.response_id) ?? "") + event.delta,
+            );
+          }
+          break;
+
+        case "response.output_text.done":
+          if (event.response_id) {
+            logRef.current.finalizeAgent(event.response_id, event.text);
+            if (typeof event.text === "string" && event.text.trim()) {
+              textBufferRef.current.set(event.response_id, event.text);
+            }
+          }
+          break;
+
         case "output_audio_buffer.started":
           recordLatency();
           setStatusSafe("speaking");
@@ -361,6 +488,18 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           for (const item of event.response?.output ?? []) {
             if (item?.type === "function_call") {
               void handleFunctionCall(item.name, item.call_id, item.arguments);
+            }
+          }
+          // Modo elevenlabs: al completarse la respuesta textual, se
+          // sintetiza y reproduce. Las respuestas canceladas (barge-in)
+          // no se hablan.
+          const responseId = event.response?.id;
+          if (engineRef.current === "elevenlabs" && responseId) {
+            const text = textBufferRef.current.get(responseId) ?? "";
+            textBufferRef.current.delete(responseId);
+            if (event.response?.status === "completed" && text.trim()) {
+              void playTtsAudio(text);
+              break;
             }
           }
           // Si la respuesta no produjo audio, vuelve a escuchar.
@@ -382,7 +521,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           break;
       }
     },
-    [handleFunctionCall, recordLatency, setStatusSafe],
+    [handleFunctionCall, playTtsAudio, recordLatency, setStatusSafe, stopTtsPlayback],
   );
 
   const scheduleReconnectRef = useRef<() => void>(() => {});
@@ -447,7 +586,13 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           throw new SessionError(toAppError("session_create_failed"));
         }
         const session = (await sessionResponse.json()) as SessionResponse;
-        setSessionInfo({ model: session.model, voice: session.voice, agentName: session.agentName });
+        engineRef.current = session.voiceEngine ?? "openai_realtime";
+        setSessionInfo({
+          model: session.model,
+          voice: session.voice,
+          agentName: session.agentName,
+          engine: engineRef.current,
+        });
 
         // 3) WebRTC hacia OpenAI con el token efímero.
         const pc = new RTCPeerConnection();
@@ -633,12 +778,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   }, []);
 
   const stopSpeaking = useCallback(() => {
-    sendEvent({ type: "response.cancel" });
-    sendEvent({ type: "output_audio_buffer.clear" });
+    cancelActiveResponse();
     if (statusRef.current === "speaking" || statusRef.current === "thinking") {
       setStatusSafe("listening");
     }
-  }, [sendEvent, setStatusSafe]);
+  }, [cancelActiveResponse, setStatusSafe]);
 
   const sendText = useCallback(
     (text: string): boolean => {
@@ -647,8 +791,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       // Escribir equivale a interrumpir: si el agente está respondiendo,
       // se cancela la respuesta activa antes de pedir una nueva.
       if (statusRef.current === "speaking" || statusRef.current === "thinking") {
-        sendEvent({ type: "response.cancel" });
-        sendEvent({ type: "output_audio_buffer.clear" });
+        cancelActiveResponse();
       }
       const created = sendEvent({
         type: "conversation.item.create",
@@ -658,7 +801,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       sendEvent({ type: "response.create" });
       return true;
     },
-    [sendEvent],
+    [cancelActiveResponse, sendEvent],
   );
 
   const resumeAudio = useCallback(() => {
@@ -710,7 +853,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       dcRef.current?.close();
       pcRef.current?.close();
       micStreamRef.current?.getTracks().forEach((track) => track.stop());
-      if (audioRef.current) audioRef.current.srcObject = null;
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.srcObject = null;
+      }
+      if (ttsUrlRef.current) URL.revokeObjectURL(ttsUrlRef.current);
     };
   }, []);
 

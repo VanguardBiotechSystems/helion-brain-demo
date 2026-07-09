@@ -61,6 +61,33 @@ Helion es una aplicación **Next.js 15 (App Router) + React 19 + TypeScript estr
 - **Mute**: `track.enabled = false` (no se renegocia SDP).
 - **Niveles de audio**: dos `AnalyserNode` (micrófono y stream remoto) escriben en refs a 60 fps; el orbe canvas las lee sin re-renderizar React.
 
+## Motores de voz (VOICE_ENGINE)
+
+La voz de salida es intercambiable sin tocar el resto del producto:
+
+### `openai_realtime` (por defecto)
+
+Speech-to-speech puro: el mismo modelo escucha y habla por WebRTC. Latencia mínima. El acento castellano se moldea con la sección «Voz y acento» de las instrucciones (las voces de OpenAI — `cedar`, `ash`, `echo`, `verse` como opciones masculinas/juveniles — no son españolas nativas). No existe `TtsProvider` en este modo: el audio lo emite el propio modelo por la pista WebRTC remota.
+
+### `elevenlabs` (voz española nativa)
+
+Los oídos y el cerebro no cambian: se crea la misma sesión Realtime (VAD semántico, transcripción, contexto, herramientas), pero con `output_modalities: ["text"]`. El flujo pasa a ser:
+
+```
+usuario habla ──► sesión realtime (VAD + STT + razonamiento, sin audio de salida)
+   │ response.output_text.delta  → subtítulos en vivo
+   ▼ response.done (status: completed)
+cliente ──POST /api/tts {text}──► servidor ──► ElevenLabs /v1/text-to-speech/{voice}
+   ◄──────── audio (mp3) ────────┘   (xi-api-key solo en servidor)
+cliente reproduce el audio ──► estado "hablando" (barge-in: al hablar tú, se pausa)
+```
+
+- Abstracción en `lib/server/tts.ts`: `TtsProvider.synthesize(text, options) → TtsResult`, implementada por `ElevenLabsTtsProvider` (modelo por defecto `eleven_flash_v2_5` con `language_code: "es"` forzado; los modelos multilingual clásicos no aceptan ese parámetro y se omite).
+- Endpoints: `POST /api/tts` (texto→audio, autenticado, rate limit 60/10 min) y `GET /api/voice/test` (frase fija de prueba en castellano; funciona aunque el motor activo sea `openai_realtime`, para validar credenciales/voz antes de cambiar).
+- Las respuestas canceladas por barge-in (`response.done` con `status ≠ completed`) no se sintetizan. El botón «cortar voz» y el envío de texto detienen la reproducción local y cancelan la respuesta activa.
+- Latencia: se paga la generación completa del texto + una llamada TTS (~0,5–1,5 s extra frente al realtime nativo). Optimización futura documentada: sintetizar por frases a medida que llegan los deltas.
+- Errores de ElevenLabs mapeados: 401/403 (clave/permisos — las voces de Voice Library requieren plan de pago por API), 402 (créditos), 404/400 (voice id), 429 (rate limit).
+
 ## Herramientas simuladas del robot
 
 - El servidor declara `robot_gesture` en la configuración de sesión (JSON Schema con enum de gestos seguros).
@@ -96,7 +123,7 @@ Taxonomía única en `lib/shared/errors.ts` (16 códigos) con mensaje humano + p
 app/            páginas (server) y rutas API
 components/     UI (AccessGate, VoiceAgentPage, orbe, transcripción, diagnóstico…)
 hooks/          useRealtimeSession, useConversationLog, useMicrophoneLevel, useAccessSession
-lib/server/     env, access, rateLimit, realtime, personality, log
+lib/server/     env, access, rateLimit, realtime, personality, tts, log
 lib/robot/      contrato RobotAdapter + MockRobotAdapter + tools realtime
 lib/shared/     tipos y taxonomía de errores compartidos
 tests/          unit tests (Vitest) de env, access, rate limit y robot

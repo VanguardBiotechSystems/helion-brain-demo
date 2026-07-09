@@ -6,6 +6,8 @@ import { createHash } from "node:crypto";
  * funcione sin secretos y para que los errores sean claros en runtime.
  */
 
+export type VoiceEngine = "openai_realtime" | "elevenlabs";
+
 export interface AppEnv {
   openaiApiKey: string;
   openaiBaseUrl: string;
@@ -20,6 +22,12 @@ export interface AppEnv {
   sessionSecret: string;
   agentName: string;
   appName: string;
+  /** Motor de voz de salida. openai_realtime = speech-to-speech WebRTC. */
+  voiceEngine: VoiceEngine;
+  elevenLabsApiKey: string;
+  elevenLabsVoiceId: string;
+  elevenLabsModel: string;
+  elevenLabsOutputFormat: string;
 }
 
 export interface EnvResult {
@@ -36,9 +44,19 @@ function deriveFallbackSecret(accessPassword: string): string {
 }
 
 export function readEnv(source: Record<string, string | undefined> = process.env): EnvResult {
-  const missing = REQUIRED.filter((name) => !source[name]?.trim());
+  const missing: string[] = REQUIRED.filter((name) => !source[name]?.trim());
+
+  // El motor de voz externo exige sus propias credenciales: fallar pronto
+  // y con nombres claros es mejor que una demo con la voz rota.
+  const voiceEngine: VoiceEngine =
+    source.VOICE_ENGINE?.trim() === "elevenlabs" ? "elevenlabs" : "openai_realtime";
+  if (voiceEngine === "elevenlabs") {
+    if (!source.ELEVENLABS_API_KEY?.trim()) missing.push("ELEVENLABS_API_KEY");
+    if (!source.ELEVENLABS_VOICE_ID?.trim()) missing.push("ELEVENLABS_VOICE_ID");
+  }
+
   if (missing.length > 0) {
-    return { env: null, missing: [...missing] };
+    return { env: null, missing };
   }
 
   const openaiApiKey = source.OPENAI_API_KEY!.trim();
@@ -53,7 +71,7 @@ export function readEnv(source: Record<string, string | undefined> = process.env
       openaiApiKey,
       openaiBaseUrl: (source.OPENAI_BASE_URL?.trim() || "https://api.openai.com").replace(/\/+$/, ""),
       realtimeModel: source.OPENAI_REALTIME_MODEL?.trim() || "gpt-realtime-2.1",
-      realtimeVoice: source.OPENAI_REALTIME_VOICE?.trim() || "marin",
+      realtimeVoice: source.OPENAI_REALTIME_VOICE?.trim() || "cedar",
       transcriptionModel: source.OPENAI_TRANSCRIPTION_MODEL?.trim() || "gpt-4o-mini-transcribe",
       transcriptionLanguage,
       turnDetection: source.OPENAI_TURN_DETECTION?.trim() === "server_vad" ? "server_vad" : "semantic_vad",
@@ -62,6 +80,11 @@ export function readEnv(source: Record<string, string | undefined> = process.env
       sessionSecret: source.SESSION_SECRET?.trim() || deriveFallbackSecret(accessPassword),
       agentName: source.AGENT_NAME?.trim() || "Atlas",
       appName: source.NEXT_PUBLIC_APP_NAME?.trim() || "Helion",
+      voiceEngine,
+      elevenLabsApiKey: source.ELEVENLABS_API_KEY?.trim() ?? "",
+      elevenLabsVoiceId: source.ELEVENLABS_VOICE_ID?.trim() ?? "",
+      elevenLabsModel: source.ELEVENLABS_MODEL?.trim() || "eleven_flash_v2_5",
+      elevenLabsOutputFormat: source.ELEVENLABS_OUTPUT_FORMAT?.trim() || "mp3_44100_128",
     },
     missing: [],
   };

@@ -7,6 +7,7 @@ Helion es una aplicación web que da voz, oído y razonamiento a un robot humano
 ## Características
 
 - **Voz en tiempo real (ruta principal):** OpenAI Realtime API por WebRTC directamente desde el navegador. Detección de turnos semántica, *barge-in* (puedes interrumpir al agente mientras habla), latencia baja.
+- **Dos motores de voz:** `openai_realtime` (speech-to-speech, latencia mínima) o `elevenlabs` (voz española nativa real sintetizada en servidor, algo más de latencia). Ver [Voz en español de España](#voz-en-español-de-españa).
 - **Seguridad de claves:** la API key de OpenAI vive solo en el servidor. El navegador recibe únicamente un token efímero que caduca en minutos.
 - **Acceso protegido:** passcode + cookie firmada (HMAC-SHA256, httpOnly). Rate limiting por IP en login, creación de sesiones y chat.
 - **UI de producto:** orbe de estado animado (escuchando / pensando / hablando / reconectando / error), subtítulos en vivo, latencia aproximada, controles para mutear, cortar la voz, reiniciar sesión y borrar conversación.
@@ -43,8 +44,13 @@ Copia `.env.example` a `.env.local` y rellena los valores. Resumen:
 | `OPENAI_API_KEY` | ✅ | — | Clave secreta de OpenAI (solo servidor). |
 | `APP_ACCESS_PASSWORD` | ✅ | — | Passcode de la demo. |
 | `SESSION_SECRET` | recomendada | derivado | Secreto para firmar cookies (`openssl rand -hex 32`). |
+| `VOICE_ENGINE` | — | `openai_realtime` | Motor de voz: `openai_realtime` o `elevenlabs`. |
 | `OPENAI_REALTIME_MODEL` | — | `gpt-realtime-2.1` | Modelo speech-to-speech. |
-| `OPENAI_REALTIME_VOICE` | — | `marin` | Voz (`marin`, `cedar`, `alloy`, `echo`, `verse`…). |
+| `OPENAI_REALTIME_VOICE` | — | `cedar` | Voz OpenAI (recomendadas masculina/juvenil: `cedar`, `ash`, `echo`, `verse`). |
+| `ELEVENLABS_API_KEY` | si `elevenlabs` | — | Clave de ElevenLabs (solo servidor). |
+| `ELEVENLABS_VOICE_ID` | si `elevenlabs` | — | ID de la voz española elegida. |
+| `ELEVENLABS_MODEL` | — | `eleven_flash_v2_5` | Modelo TTS de baja latencia. |
+| `ELEVENLABS_OUTPUT_FORMAT` | — | `mp3_44100_128` | Formato del audio generado. |
 | `OPENAI_TRANSCRIPTION_MODEL` | — | `gpt-4o-mini-transcribe` | Transcripción para subtítulos. |
 | `OPENAI_TRANSCRIPTION_LANGUAGE` | — | `es` | Idioma esperado (`auto` para autodetección). |
 | `OPENAI_TURN_DETECTION` | — | `semantic_vad` | `semantic_vad` o `server_vad`. |
@@ -123,12 +129,48 @@ En cualquier plataforma: **nunca** subas `.env.local`; usa siempre el gestor de 
 
 Envíale: (1) la URL pública, (2) el passcode, (3) una línea de contexto: *“Es el cerebro conversacional del robot: habla con él; los gestos aparecen como acciones simuladas hasta que conectemos el cuerpo”*. No necesita instalar nada.
 
+## Voz en español de España
+
+El objetivo: que el agente suene como un chico joven español, no como un angloparlante hablando español. Hay dos niveles:
+
+### Nivel 1 — OpenAI Realtime afinado (por defecto)
+
+- La personalidad (`lib/server/personality.ts`) incluye una sección **«Voz y acento»** de prioridad máxima: castellano peninsular, distinción c/z, ritmo conversacional español, vocabulario de España ("vale", "ordenador", "móvil"), prohibición de calcos del inglés y de expresiones latinoamericanas. El modelo speech-to-speech modula el acento según estas instrucciones.
+- Voz por defecto: `cedar`. Orden recomendado para masculino/juvenil: **`cedar` → `ash` → `echo` → `verse`**.
+- **Honestidad:** ninguna voz de OpenAI es española nativa; son voces multilingües con base angloamericana. Con las instrucciones mejora mucho, pero si el acento sigue sin convencer, usa el Nivel 2.
+
+### Nivel 2 — Voz española nativa con ElevenLabs (`VOICE_ENGINE=elevenlabs`)
+
+En este modo, los **oídos y el cerebro siguen siendo OpenAI Realtime** (misma detección de turnos, interrupciones, contexto y herramientas), pero el modelo responde en texto y la voz la genera **ElevenLabs** en servidor con una voz española real. Latencia algo mayor (≈0,5–1,5 s más); pronunciación claramente nativa.
+
+**Cómo activarlo:**
+
+1. Crea cuenta en [elevenlabs.io](https://elevenlabs.io).
+2. Perfil → **API Keys** → crea una clave.
+3. **Voice Library** → filtra idioma *Spanish*, acento *Castilian/Peninsular*, género masculino, edad joven → **Add to My Voices**.
+4. En *My Voices* → menú ⋯ de la voz → **Copy voice ID**.
+5. En `.env.local` (o en tu plataforma cloud):
+   ```
+   VOICE_ENGINE=elevenlabs
+   ELEVENLABS_API_KEY=tu-clave
+   ELEVENLABS_VOICE_ID=el-voice-id-copiado
+   ```
+6. Reinicia/redespliega y **prueba antes de la demo**: panel de diagnóstico 🔧 → **«▶ Probar voz española»** (o abre `/api/voice/test` con la sesión iniciada). Oirás: *"Hola, soy Helion. Esta es una prueba de voz en español de España…"*. La prueba funciona aunque el motor activo siga siendo `openai_realtime`, para validar la voz antes de cambiar.
+
+**Avisos importantes:**
+
+- Usar voces de la **Voice Library por API requiere plan de pago** (Starter o superior). En el plan gratuito solo funcionan por API las voces por defecto de tu cuenta. El plan gratuito además da ~10.000 caracteres/mes y exige atribución (sin licencia comercial).
+- **No uses clonación de voz ni voces de personas reales sin consentimiento explícito.** Elige solo voces publicadas legalmente en la librería del proveedor.
+- La clave de ElevenLabs nunca llega al navegador: toda síntesis pasa por `/api/tts` en servidor.
+
 ## Personalización
 
-- **Voz:** cambia `OPENAI_REALTIME_VOICE` (p. ej. `cedar`) y redespliega.
+- **Motor de voz:** `VOICE_ENGINE=openai_realtime | elevenlabs` (ver sección anterior).
+- **Voz OpenAI:** cambia `OPENAI_REALTIME_VOICE` (p. ej. `ash`) y redespliega.
+- **Voz ElevenLabs:** cambia `ELEVENLABS_VOICE_ID` y redespliega; valida con «Probar voz española».
 - **Modelo:** `OPENAI_REALTIME_MODEL` (p. ej. `gpt-realtime-2.1-mini` para abaratar).
 - **Nombre del agente:** `AGENT_NAME=JARVIS`.
-- **Personalidad:** edita `lib/server/personality.ts` (tono, idioma, políticas). Es el único sitio donde se define.
+- **Personalidad:** edita `lib/server/personality.ts` (tono, idioma, acento, políticas). Es el único sitio donde se define.
 
 ## Solución de problemas
 
@@ -143,6 +185,8 @@ Envíale: (1) la URL pública, (2) el passcode, (3) una línea de contexto: *“
 | La voz se corta al perder Wi-Fi | Red caída | La app muestra «Reconectando…» y reintenta sola al volver la red. |
 | «Configuración pendiente» al abrir la URL | Faltan variables de entorno | Añádelas en la plataforma y redespliega. |
 | El agente no me oye pero estoy conectado | Micro silenciado o dispositivo de entrada equivocado | Revisa el botón de mute y el selector de micrófono del sistema. |
+| La voz suena a extranjero hablando español | Límite de las voces OpenAI | Prueba `cedar`/`ash`, y si no convence activa `VOICE_ENGINE=elevenlabs` con una voz castellana. |
+| «No se pudo generar la voz española externa» | Credenciales/cuota de ElevenLabs | Revisa `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, créditos y que la voz sea usable por API en tu plan. |
 
 ## Seguridad
 
@@ -162,7 +206,8 @@ El audio realtime se factura por tokens de audio de entrada/salida y es sensible
 - La latencia aproximada mostrada es una estimación local (fin de tu frase → primer audio), no una métrica de red exacta.
 - El rate limiting en memoria se reinicia con cada despliegue/instancia.
 - Sin persistencia: no hay historial entre visitas (decisión deliberada de privacidad para la demo).
-- El modo texto fallback no reproduce voz (responde por escrito).
+- El modo texto fallback no reproduce voz (responde por escrito) cuando no hay sesión de voz activa; con sesión activa, lo escrito sí se responde con voz.
+- En modo `elevenlabs` la voz tarda un poco más (se sintetiza al completarse la respuesta) y el consumo de caracteres cuenta contra la cuota de ElevenLabs.
 
 ## Qué falta para conectarlo al robot físico
 

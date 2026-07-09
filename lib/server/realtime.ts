@@ -52,20 +52,25 @@ export function buildRealtimeSessionConfig(env: AppEnv): Record<string, unknown>
     transcription.language = env.transcriptionLanguage;
   }
 
+  // Con motor de voz externo (ElevenLabs), el modelo responde solo texto:
+  // los oídos (VAD + transcripción) siguen siendo los de la sesión realtime,
+  // y la voz la sintetiza el servidor con el TtsProvider configurado.
+  const audio: Record<string, unknown> = {
+    input: {
+      transcription,
+      turn_detection: turnDetection,
+    },
+  };
+  if (env.voiceEngine === "openai_realtime") {
+    audio.output = { voice: env.realtimeVoice };
+  }
+
   const config: Record<string, unknown> = {
     type: "realtime",
     model: env.realtimeModel,
-    instructions: buildAgentInstructions(env.agentName),
-    output_modalities: ["audio"],
-    audio: {
-      input: {
-        transcription,
-        turn_detection: turnDetection,
-      },
-      output: {
-        voice: env.realtimeVoice,
-      },
-    },
+    instructions: buildAgentInstructions(env.agentName, env.voiceEngine),
+    output_modalities: env.voiceEngine === "elevenlabs" ? ["text"] : ["audio"],
+    audio,
     tools: REALTIME_ROBOT_TOOLS,
     tool_choice: "auto",
   };
