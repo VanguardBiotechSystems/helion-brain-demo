@@ -1,11 +1,15 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { RobotActionInfo, TranscriptEntry } from "@/lib/shared/types";
 
 /**
  * Registro local de la conversación (solo en memoria del navegador).
  * No se persiste nada: al recargar o borrar, desaparece.
+ *
+ * Los ids de las entradas de voz derivan de los ids de OpenAI
+ * (item_id / response_id), de modo que los updaters de estado son puros
+ * e idempotentes: seguros bajo React StrictMode y replays concurrentes.
  */
 
 export interface ConversationLog {
@@ -29,92 +33,88 @@ function makeId(): string {
 
 export function useConversationLog(): ConversationLog {
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
-  // item_id de OpenAI -> id de entrada local
-  const userItemMap = useRef(new Map<string, string>());
-  // response_id de OpenAI -> id de entrada local
-  const agentResponseMap = useRef(new Map<string, string>());
 
   const addUser = useCallback((text: string) => {
-    setEntries((prev) => [...prev, { id: makeId(), role: "user", text, at: Date.now() }]);
+    const entry: TranscriptEntry = { id: makeId(), role: "user", text, at: Date.now() };
+    setEntries((prev) => [...prev, entry]);
   }, []);
 
   const appendUserPartial = useCallback((itemId: string, delta: string) => {
+    const id = `user-${itemId}`;
+    const at = Date.now();
     setEntries((prev) => {
-      const entryId = userItemMap.current.get(itemId);
-      if (!entryId) {
-        const id = makeId();
-        userItemMap.current.set(itemId, id);
-        return [...prev, { id, role: "user" as const, text: delta, at: Date.now(), pending: true }];
+      if (!prev.some((e) => e.id === id)) {
+        return [...prev, { id, role: "user" as const, text: delta, at, pending: true }];
       }
-      return prev.map((e) => (e.id === entryId ? { ...e, text: e.text + delta } : e));
+      return prev.map((e) => (e.id === id ? { ...e, text: e.text + delta } : e));
     });
   }, []);
 
   const finalizeUser = useCallback((itemId: string, transcript: string) => {
+    const id = `user-${itemId}`;
+    const finalText = transcript.trim();
+    const at = Date.now();
     setEntries((prev) => {
-      const entryId = userItemMap.current.get(itemId);
-      const finalText = transcript.trim();
-      if (!entryId) {
-        if (!finalText) return prev;
-        const id = makeId();
-        userItemMap.current.set(itemId, id);
-        return [...prev, { id, role: "user" as const, text: finalText, at: Date.now() }];
+      if (!prev.some((e) => e.id === id)) {
+        return finalText ? [...prev, { id, role: "user" as const, text: finalText, at }] : prev;
       }
       if (!finalText) {
-        // Transcripción vacía (silencio/ruido): descarta la burbuja pendiente.
-        return prev.filter((e) => e.id !== entryId || e.text.trim().length > 0);
+        // Transcripción vacía (silencio/ruido): descarta la burbuja si no acumuló texto.
+        return prev.filter((e) => e.id !== id || e.text.trim().length > 0);
       }
-      return prev.map((e) => (e.id === entryId ? { ...e, text: finalText, pending: false } : e));
+      return prev.map((e) => (e.id === id ? { ...e, text: finalText, pending: false } : e));
     });
   }, []);
 
   const startAgent = useCallback((responseId: string) => {
-    setEntries((prev) => {
-      if (agentResponseMap.current.has(responseId)) return prev;
-      const id = makeId();
-      agentResponseMap.current.set(responseId, id);
-      return [...prev, { id, role: "agent" as const, text: "", at: Date.now(), pending: true }];
-    });
+    const id = `agent-${responseId}`;
+    const at = Date.now();
+    setEntries((prev) =>
+      prev.some((e) => e.id === id)
+        ? prev
+        : [...prev, { id, role: "agent" as const, text: "", at, pending: true }],
+    );
   }, []);
 
   const appendAgent = useCallback((responseId: string, delta: string) => {
+    const id = `agent-${responseId}`;
+    const at = Date.now();
     setEntries((prev) => {
-      const entryId = agentResponseMap.current.get(responseId);
-      if (!entryId) {
-        const id = makeId();
-        agentResponseMap.current.set(responseId, id);
-        return [...prev, { id, role: "agent" as const, text: delta, at: Date.now(), pending: true }];
+      if (!prev.some((e) => e.id === id)) {
+        return [...prev, { id, role: "agent" as const, text: delta, at, pending: true }];
       }
-      return prev.map((e) => (e.id === entryId ? { ...e, text: e.text + delta } : e));
+      return prev.map((e) => (e.id === id ? { ...e, text: e.text + delta } : e));
     });
   }, []);
 
   const finalizeAgent = useCallback((responseId: string, transcript?: string) => {
-    setEntries((prev) => {
-      const entryId = agentResponseMap.current.get(responseId);
-      if (!entryId) return prev;
-      return prev
+    const id = `agent-${responseId}`;
+    setEntries((prev) =>
+      prev
         .map((e) =>
-          e.id === entryId ? { ...e, text: (transcript ?? e.text).trim() || e.text, pending: false } : e,
+          e.id === id ? { ...e, text: (transcript ?? e.text).trim() || e.text, pending: false } : e,
         )
-        .filter((e) => e.id !== entryId || e.text.trim().length > 0);
-    });
+        .filter((e) => e.id !== id || e.text.trim().length > 0),
+    );
   }, []);
 
   const addAction = useCallback((action: RobotActionInfo) => {
-    setEntries((prev) => [
-      ...prev,
-      { id: makeId(), role: "action", text: action.detail ?? action.command, at: Date.now(), action },
-    ]);
+    const entry: TranscriptEntry = {
+      id: makeId(),
+      role: "action",
+      text: action.detail ?? action.command,
+      at: Date.now(),
+      action,
+    };
+    setEntries((prev) => [...prev, entry]);
   }, []);
 
   const addSystem = useCallback((text: string) => {
-    setEntries((prev) => [...prev, { id: makeId(), role: "system", text, at: Date.now() }]);
+    const entry: TranscriptEntry = { id: makeId(), role: "system", text, at: Date.now() };
+    setEntries((prev) => [...prev, entry]);
   }, []);
 
   const clear = useCallback(() => {
-    userItemMap.current.clear();
-    agentResponseMap.current.clear();
     setEntries([]);
   }, []);
 

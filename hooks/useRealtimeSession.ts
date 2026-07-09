@@ -60,6 +60,41 @@ function makeId(): string {
   return `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+/**
+ * Convierte cualquier excepción del flujo de conexión en un error con
+ * mensaje humano en español. El detalle técnico (p. ej. "Failed to fetch")
+ * se queda en consola, nunca en la UI.
+ */
+function mapCaughtError(caught: unknown): AppError {
+  if (caught instanceof SessionError) return caught.appError;
+  if (caught instanceof DOMException && (caught.name === "AbortError" || caught.name === "TimeoutError")) {
+    return toAppError("session_create_failed", "La conexión tardó demasiado en responder.");
+  }
+  if (caught instanceof TypeError) {
+    return typeof navigator !== "undefined" && navigator.onLine === false
+      ? toAppError("network_offline")
+      : toAppError("session_create_failed", "No se pudo contactar con el servidor.");
+  }
+  console.warn("[realtime] error no clasificado:", caught);
+  return toAppError("unknown");
+}
+
+/** Códigos que merecen reintento automático cuando falla una reconexión. */
+const RETRYABLE_ON_RECONNECT: ReadonlySet<string> = new Set([
+  "network_offline",
+  "webrtc_failed",
+  "session_create_failed",
+  "openai_error",
+  "rate_limited",
+  "unknown",
+]);
+
+function requestTimeoutSignal(ms: number): AbortSignal | undefined {
+  return typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
+    ? AbortSignal.timeout(ms)
+    : undefined;
+}
+
 function isKnownErrorCode(code: unknown): code is ErrorCode {
   return (
     typeof code === "string" &&
@@ -335,8 +370,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
 
         case "error": {
           const code = event.error?.code ?? "";
-          // Errores benignos (p. ej. cancelar cuando no hay respuesta activa).
-          if (code.includes("cancel")) break;
+          // Errores benignos: cancelar sin respuesta activa, o pedir una
+          // respuesta cuando ya hay una en curso (se resuelve solo).
+          if (code.includes("cancel") || code === "conversation_already_has_active_response") break;
           console.warn("[realtime] error del servidor:", event.error);
           setError(toAppError("openai_error", event.error?.message));
           break;
@@ -398,7 +434,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         // 2) Sesión efímera desde nuestro servidor (la API key no sale de él).
         setStatus("connecting");
         statusRef.current = "connecting";
-        const sessionResponse = await fetch("/api/session", { method: "POST" });
+        const sessionResponse = await fetch("/api/session", {
+          method: "POST",
+          signal: requestTimeoutSignal(15000),
+        });
         if (!sessionResponse.ok) {
           const body = (await sessionResponse.json().catch(() => null)) as ApiErrorBody | null;
           const code = body?.error?.code;
@@ -479,6 +518,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
             "Content-Type": "application/sdp",
           },
           body: offer.sdp,
+          signal: requestTimeoutSignal(15000),
         });
         if (!sdpResponse.ok) {
           throw new SessionError(
@@ -498,10 +538,19 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         }, CONNECT_TIMEOUT_MS);
       } catch (caught) {
         cleanupPeer(true);
-        const appError =
-          caught instanceof SessionError
-            ? caught.appError
-            : toAppError("unknown", caught instanceof Error ? caught.message : undefined);
+        const appError = mapCaughtError(caught);
+        // En reconexiones, los fallos transitorios reprograman el siguiente
+        // intento (backoff) en lugar de rendirse al primer error.
+        if (
+          isReconnect &&
+          !intentionalCloseRef.current &&
+          RETRYABLE_ON_RECONNECT.has(appError.code) &&
+          reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS
+        ) {
+          connectingRef.current = false;
+          scheduleReconnectRef.current();
+          return;
+        }
         setError(appError);
         setStatus("error");
         statusRef.current = "error";
@@ -595,6 +644,12 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     (text: string): boolean => {
       const trimmed = text.trim();
       if (!trimmed) return false;
+      // Escribir equivale a interrumpir: si el agente está respondiendo,
+      // se cancela la respuesta activa antes de pedir una nueva.
+      if (statusRef.current === "speaking" || statusRef.current === "thinking") {
+        sendEvent({ type: "response.cancel" });
+        sendEvent({ type: "output_audio_buffer.clear" });
+      }
       const created = sendEvent({
         type: "conversation.item.create",
         item: { type: "message", role: "user", content: [{ type: "input_text", text: trimmed }] },

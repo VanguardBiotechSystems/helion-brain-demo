@@ -92,6 +92,7 @@ export default function VoiceAgentPage({
       case "webrtc_failed":
       case "session_create_failed":
       case "openai_error":
+      case "unknown":
         return realtime.isConnected ? null : { label: "Reintentar", onClick: () => void realtime.connect() };
       default:
         return null;
