@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resolveProfiles, type AccessProfile } from "./profiles";
 
 /**
  * Lectura y validación de variables de entorno.
@@ -74,6 +75,10 @@ export interface MemoryConfig {
   debug: boolean;
   /** Presupuesto duro de bloqueo de memoria en el camino crítico (ms). */
   maxBlockingMs: number;
+  /** Scope por defecto para recuerdos nuevos sin pista explícita. */
+  defaultScope: "private" | "project" | "project_demo" | "public";
+  /** Autoconocimiento seguro de Helion en las instrucciones. */
+  selfKnowledgeEnabled: boolean;
 }
 
 export interface AppEnv {
@@ -86,6 +91,8 @@ export interface AppEnv {
   transcriptionLanguage: string;
   textModel: string;
   accessPassword: string;
+  /** Perfiles de acceso resueltos (Juanma/Sergio/inversor/visitante…). */
+  profiles: AccessProfile[];
   sessionSecret: string;
   agentName: string;
   appName: string;
@@ -106,7 +113,7 @@ export interface EnvResult {
   missing: string[];
 }
 
-const REQUIRED = ["OPENAI_API_KEY", "APP_ACCESS_PASSWORD"] as const;
+const REQUIRED = ["OPENAI_API_KEY"] as const;
 
 interface AudioProfilePreset
   extends Pick<
@@ -281,6 +288,12 @@ function readMemoryConfig(source: Record<string, string | undefined>): MemoryCon
     retentionDays: retentionRaw > 0 ? retentionRaw : null,
     debug: parseBoolean(source.MEMORY_DEBUG, false),
     maxBlockingMs: parseNumber(source.MEMORY_MAX_BLOCKING_MS, 200, 50, 2000),
+    defaultScope: parseEnum(
+      source.MEMORY_DEFAULT_SCOPE,
+      ["private", "project", "project_demo", "public"],
+      "project_demo",
+    ),
+    selfKnowledgeEnabled: parseBoolean(source.SELF_KNOWLEDGE_ENABLED, true),
   };
 }
 
@@ -318,6 +331,15 @@ function readHelionTuning(source: Record<string, string | undefined>): HelionTun
 export function readEnv(source: Record<string, string | undefined> = process.env): EnvResult {
   const missing: string[] = REQUIRED.filter((name) => !source[name]?.trim());
 
+  // Identidad: hace falta al menos un perfil de acceso (por JSON, por
+  // passcodes simples o por APP_ACCESS_PASSWORD legado).
+  const { profiles, error: profilesError } = resolveProfiles(source);
+  if (profilesError) {
+    missing.push(`ACCESS_PROFILES_JSON (${profilesError})`);
+  } else if (profiles.length === 0) {
+    missing.push("APP_ACCESS_PASSWORD (u OWNER_PASSCODE / ACCESS_PROFILES_JSON)");
+  }
+
   // El motor de voz externo exige sus propias credenciales: fallar pronto
   // y con nombres claros es mejor que una demo con la voz rota.
   const voiceEngine: VoiceEngine =
@@ -337,7 +359,9 @@ export function readEnv(source: Record<string, string | undefined> = process.env
   }
 
   const openaiApiKey = source.OPENAI_API_KEY!.trim();
-  const accessPassword = source.APP_ACCESS_PASSWORD!.trim();
+  const accessPassword = source.APP_ACCESS_PASSWORD?.trim() ?? "";
+  // Semilla del secreto de sesión derivado: el conjunto de passcodes.
+  const secretSeed = accessPassword || profiles.map((p) => p.passcode).join("|");
 
   const languageRaw = source.OPENAI_TRANSCRIPTION_LANGUAGE;
   const transcriptionLanguage =
@@ -353,7 +377,8 @@ export function readEnv(source: Record<string, string | undefined> = process.env
       transcriptionLanguage,
       textModel: source.OPENAI_TEXT_MODEL?.trim() || "gpt-4.1-mini",
       accessPassword,
-      sessionSecret: source.SESSION_SECRET?.trim() || deriveFallbackSecret(accessPassword),
+      profiles,
+      sessionSecret: source.SESSION_SECRET?.trim() || deriveFallbackSecret(secretSeed),
       agentName: source.AGENT_NAME?.trim() || "Atlas",
       appName: source.NEXT_PUBLIC_APP_NAME?.trim() || "Helion",
       voiceEngine,

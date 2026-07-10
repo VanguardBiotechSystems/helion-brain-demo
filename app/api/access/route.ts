@@ -3,9 +3,9 @@ import {
   ACCESS_COOKIE,
   ACCESS_TTL_MS,
   createAccessToken,
-  passcodeMatches,
   verifyAccessToken,
 } from "@/lib/server/access";
+import { getProfileById, matchProfileByPasscode } from "@/lib/server/profiles";
 import { readEnv } from "@/lib/server/env";
 import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
 import { logError, logInfo } from "@/lib/server/log";
@@ -19,11 +19,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ authenticated: false, configured: false });
   }
   const token = request.cookies.get(ACCESS_COOKIE)?.value;
+  const profileId = verifyAccessToken(env.sessionSecret, token);
+  const profile = getProfileById(env.profiles, profileId);
   return NextResponse.json({
-    authenticated: verifyAccessToken(env.sessionSecret, token),
+    authenticated: Boolean(profile),
     configured: true,
     appName: env.appName,
     agentName: env.agentName,
+    profile: profile
+      ? { id: profile.id, displayName: profile.displayName, role: profile.role, canViewDebug: profile.canViewDebug }
+      : null,
   });
 }
 
@@ -51,7 +56,8 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as { passcode?: unknown } | null;
   const passcode = typeof body?.passcode === "string" ? body.passcode : "";
 
-  if (!passcodeMatches(env.accessPassword, passcode)) {
+  const profile = matchProfileByPasscode(env.profiles, passcode);
+  if (!profile) {
     logInfo("access", `Passcode incorrecto desde ip=${ip}`);
     return NextResponse.json(
       { error: { code: "passcode_incorrect", message: "Passcode incorrecto." } },
@@ -60,14 +66,14 @@ export async function POST(request: NextRequest) {
   }
 
   const response = NextResponse.json({ ok: true });
-  response.cookies.set(ACCESS_COOKIE, createAccessToken(env.sessionSecret), {
+  response.cookies.set(ACCESS_COOKIE, createAccessToken(env.sessionSecret, profile.id), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: Math.floor(ACCESS_TTL_MS / 1000),
   });
-  logInfo("access", `Acceso concedido a ip=${ip}`);
+  logInfo("access", `Acceso concedido a ip=${ip} perfil=${profile.id}`);
   return response;
 }
 

@@ -13,22 +13,38 @@ function sign(secret: string, payload: string): string {
   return createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
-export function createAccessToken(secret: string, now: number = Date.now(), ttlMs: number = ACCESS_TTL_MS): string {
-  const payload = `${now + ttlMs}.${randomBytes(9).toString("base64url")}`;
+export function createAccessToken(
+  secret: string,
+  profileId: string = "guest",
+  now: number = Date.now(),
+  ttlMs: number = ACCESS_TTL_MS,
+): string {
+  const safeProfile = profileId.replace(/[^a-zA-Z0-9_-]/g, "");
+  const payload = `${now + ttlMs}.${randomBytes(9).toString("base64url")}.${safeProfile}`;
   return `${payload}.${sign(secret, payload)}`;
 }
 
-export function verifyAccessToken(secret: string, token: string | undefined, now: number = Date.now()): boolean {
-  if (!token) return false;
+/**
+ * Verifica el token y devuelve el profileId firmado, o null si no es
+ * válido. El perfil viaja DENTRO de la firma: el cliente no puede
+ * autoasignarse identidad.
+ */
+export function verifyAccessToken(
+  secret: string,
+  token: string | undefined,
+  now: number = Date.now(),
+): string | null {
+  if (!token) return null;
   const parts = token.split(".");
-  if (parts.length !== 3) return false;
-  const [expStr, nonce, signature] = parts;
-  const expected = sign(secret, `${expStr}.${nonce}`);
+  if (parts.length !== 4) return null;
+  const [expStr, nonce, profileId, signature] = parts;
+  const expected = sign(secret, `${expStr}.${nonce}.${profileId}`);
   const a = Buffer.from(signature);
   const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   const expiresAt = Number(expStr);
-  return Number.isFinite(expiresAt) && expiresAt > now;
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) return null;
+  return profileId || "guest";
 }
 
 /** Comparación en tiempo constante (hasheando primero para igualar longitudes). */

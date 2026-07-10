@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, verifyAccessToken } from "./access";
 import { readEnv, type AppEnv } from "./env";
+import { getProfileById, type AccessProfile } from "./profiles";
 import { clientIpFrom, getLimiter } from "./rateLimit";
 
 /**
@@ -13,7 +14,9 @@ export interface GuardOptions {
   limiter?: { name: string; limit: number; windowMs: number };
 }
 
-export type GuardResult = { ok: true; env: AppEnv; token: string } | { ok: false; response: NextResponse };
+export type GuardResult =
+  | { ok: true; env: AppEnv; token: string; profile: AccessProfile }
+  | { ok: false; response: NextResponse };
 
 export function requireAccess(request: NextRequest, options: GuardOptions = {}): GuardResult {
   const { env, missing } = readEnv();
@@ -33,7 +36,9 @@ export function requireAccess(request: NextRequest, options: GuardOptions = {}):
   }
 
   const token = request.cookies.get(ACCESS_COOKIE)?.value ?? "";
-  if (!verifyAccessToken(env.sessionSecret, token)) {
+  const profileId = verifyAccessToken(env.sessionSecret, token);
+  const profile = getProfileById(env.profiles, profileId);
+  if (!profileId || !profile) {
     return {
       ok: false,
       response: NextResponse.json(
@@ -58,7 +63,7 @@ export function requireAccess(request: NextRequest, options: GuardOptions = {}):
     }
   }
 
-  return { ok: true, env, token };
+  return { ok: true, env, token, profile };
 }
 
 /** Respuesta estándar cuando la memoria está desactivada por configuración. */

@@ -10,13 +10,13 @@ describe("readEnv", () => {
   it("detecta variables obligatorias ausentes", () => {
     const { env, missing } = readEnv({});
     expect(env).toBeNull();
-    expect(missing).toEqual(["OPENAI_API_KEY", "APP_ACCESS_PASSWORD"]);
+    expect(missing).toEqual(["OPENAI_API_KEY", "APP_ACCESS_PASSWORD (u OWNER_PASSCODE / ACCESS_PROFILES_JSON)"]);
   });
 
   it("detecta una sola variable ausente", () => {
     const { env, missing } = readEnv({ OPENAI_API_KEY: "sk-x-12345678" });
     expect(env).toBeNull();
-    expect(missing).toEqual(["APP_ACCESS_PASSWORD"]);
+    expect(missing).toEqual(["APP_ACCESS_PASSWORD (u OWNER_PASSCODE / ACCESS_PROFILES_JSON)"]);
   });
 
   it("trata cadenas vacías o en blanco como ausentes", () => {
