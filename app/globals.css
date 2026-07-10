@@ -1032,6 +1032,158 @@ button:disabled {
   color: var(--amber);
 }
 
+/* ── Experiencia pública minimalista ─────────────────────── */
+
+.min-shell {
+  position: relative;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  padding: 28px 20px;
+}
+
+.min-brand {
+  position: absolute;
+  top: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.32);
+  user-select: none;
+}
+
+.min-shell .orb-wrap {
+  width: min(340px, 72vw);
+}
+
+.min-status {
+  margin: 0;
+  min-height: 20px;
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  user-select: none;
+  transition: color 0.4s ease;
+}
+
+.min-error {
+  margin: 0;
+  max-width: 360px;
+  text-align: center;
+  font-size: 13.5px;
+  color: #edb4bc;
+}
+
+.min-inline-link {
+  color: var(--accent);
+  text-decoration: underline;
+  font-size: 13px;
+}
+
+.min-off-link {
+  color: var(--text-faint);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  padding: 6px 10px;
+}
+
+.min-off-link:hover {
+  color: var(--text-dim);
+}
+
+/* ── Botón liquid glass ──────────────────────────────────── */
+
+.lg-button {
+  position: relative;
+  overflow: hidden;
+  min-width: 230px;
+  padding: 16px 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 55%, rgba(120, 160, 255, 0.05) 100%);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  color: #eaf1fb;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    0 12px 44px rgba(0, 0, 0, 0.55),
+    0 0 28px rgba(88, 214, 255, 0.07);
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.3s ease,
+    background 0.3s ease,
+    border-color 0.3s ease;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.lg-button::after {
+  content: "";
+  position: absolute;
+  inset: -60% auto auto -60%;
+  width: 60%;
+  height: 220%;
+  transform: rotate(24deg) translateX(-120%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
+  transition: transform 0.7s ease;
+  pointer-events: none;
+}
+
+.lg-button:not(:disabled):hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.24);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    0 16px 54px rgba(0, 0, 0, 0.6),
+    0 0 44px rgba(88, 214, 255, 0.16);
+}
+
+.lg-button:not(:disabled):hover::after {
+  transform: rotate(24deg) translateX(340%);
+}
+
+.lg-button:not(:disabled):active {
+  transform: translateY(0) scale(0.985);
+}
+
+.lg-button:disabled {
+  opacity: 0.55;
+}
+
+.lg-ptt {
+  touch-action: none;
+}
+
+.lg-ptt-active {
+  border-color: rgba(88, 214, 255, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 0 0 2px rgba(88, 214, 255, 0.28),
+    0 0 60px rgba(88, 214, 255, 0.35);
+}
+
+@media (max-width: 560px) {
+  .lg-button {
+    min-width: 200px;
+    padding: 15px 34px;
+    font-size: 15px;
+  }
+}
+
 /* ── Responsive ──────────────────────────────────────────── */
 
 @media (max-width: 960px) {

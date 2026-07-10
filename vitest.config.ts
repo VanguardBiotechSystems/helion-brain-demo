@@ -7,8 +7,11 @@ export default defineConfig({
   resolve: {
     alias: { "@": root },
   },
+  esbuild: {
+    jsx: "automatic",
+  },
   test: {
     environment: "node",
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.{ts,tsx}"],
   },
 });

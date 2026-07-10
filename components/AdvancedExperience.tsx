@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState, type RefObject } from "react";
+import type { ConversationLog } from "@/hooks/useConversationLog";
+import type { RealtimeSession } from "@/hooks/useRealtimeSession";
 import { useAccessSession } from "@/hooks/useAccessSession";
-import { useConversationLog } from "@/hooks/useConversationLog";
-import { useMicrophoneLevel } from "@/hooks/useMicrophoneLevel";
-import { useRealtimeSession } from "@/hooks/useRealtimeSession";
 import ConnectionStatus, { statusLabel } from "./ConnectionStatus";
 import ControlBar from "./ControlBar";
 import DiagnosticsPanel from "./DiagnosticsPanel";
@@ -12,76 +11,42 @@ import ErrorBanner from "./ErrorBanner";
 import MemoryPanel from "./MemoryPanel";
 import MicLevelVisualizer from "./MicLevelVisualizer";
 import TranscriptPanel from "./TranscriptPanel";
-import { BrainIcon, LogoutIcon, WrenchIcon } from "./Icons";
+import { BrainIcon, CloseIcon, LogoutIcon, WrenchIcon } from "./Icons";
 
 /**
- * Pantalla principal: orbe de voz + controles + subtítulos + diagnóstico.
- * Toda la lógica WebRTC/Realtime vive en useRealtimeSession; aquí solo se
- * compone la experiencia.
+ * Modo avanzado (oculto en la demo pública): la consola técnica completa —
+ * transcript, controles, diagnóstico, memoria y estados detallados.
+ * Se entra con triple clic en el estado de la experiencia minimalista o
+ * con ?debug=1; se sale con el botón ✕ de la cabecera.
  */
-export default function VoiceAgentPage({
-  appName,
-  agentName,
-}: {
+
+interface AdvancedExperienceProps {
   appName: string;
   agentName: string;
-}) {
-  const log = useConversationLog();
-  const realtime = useRealtimeSession(log);
-  const micLevelRef = useMicrophoneLevel(realtime.micStream);
-  const agentLevelRef = useMicrophoneLevel(realtime.agentStream);
-  const { logout } = useAccessSession();
+  log: ConversationLog;
+  realtime: RealtimeSession;
+  micLevelRef: RefObject<number>;
+  agentLevelRef: RefObject<number>;
+  sendingText: boolean;
+  onSendText: (text: string) => Promise<void> | void;
+  onExit: () => void;
+}
 
+export default function AdvancedExperience({
+  appName,
+  agentName,
+  log,
+  realtime,
+  micLevelRef,
+  agentLevelRef,
+  sendingText,
+  onSendText,
+  onExit,
+}: AdvancedExperienceProps) {
+  const { logout } = useAccessSession();
   const [showTranscript, setShowTranscript] = useState(true);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
-  const [sendingText, setSendingText] = useState(false);
-
-  const handleSendText = useCallback(
-    async (text: string) => {
-      log.addUser(text);
-
-      // Ruta principal: misma sesión de voz en tiempo real.
-      if (realtime.sendText(text)) return;
-
-      // Fallback: pipeline textual por servidor (/api/chat).
-      setSendingText(true);
-      try {
-        const history = log.entries
-          .filter((entry) => (entry.role === "user" || entry.role === "agent") && entry.text.trim() && !entry.pending)
-          .slice(-12)
-          .map((entry) => ({
-            role: entry.role === "user" ? ("user" as const) : ("assistant" as const),
-            content: entry.text,
-          }));
-
-        const response = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: [...history, { role: "user", content: text }] }),
-        });
-
-        if (!response.ok) {
-          const body = (await response.json().catch(() => null)) as {
-            error?: { message?: string };
-          } | null;
-          log.addSystem(`No se pudo responder: ${body?.error?.message ?? "error del servidor."}`);
-          return;
-        }
-
-        const data = (await response.json()) as { reply: string };
-        const entryId = `fallback-${Date.now()}`;
-        log.startAgent(entryId);
-        log.appendAgent(entryId, data.reply);
-        log.finalizeAgent(entryId);
-      } catch {
-        log.addSystem("No se pudo enviar el mensaje: revisa tu conexión.");
-      } finally {
-        setSendingText(false);
-      }
-    },
-    [log, realtime],
-  );
 
   const errorAction = useMemo(() => {
     if (!realtime.error) return null;
@@ -108,7 +73,7 @@ export default function VoiceAgentPage({
           <span className="brand-mark" aria-hidden />
           <div>
             <div className="brand-name">{appName}</div>
-            <div className="brand-tag">Cerebro conversacional · robot humanoide</div>
+            <div className="brand-tag">Modo avanzado · consola técnica</div>
           </div>
         </div>
         <div className="topbar-right">
@@ -132,6 +97,14 @@ export default function VoiceAgentPage({
           </button>
           <button className="icon-btn" onClick={() => void logout()} aria-label="Salir" title="Salir">
             <LogoutIcon />
+          </button>
+          <button
+            className="icon-btn"
+            onClick={onExit}
+            aria-label="Salir del modo avanzado"
+            title="Salir del modo avanzado"
+          >
+            <CloseIcon />
           </button>
         </div>
       </header>
@@ -185,7 +158,7 @@ export default function VoiceAgentPage({
             entries={log.entries}
             connected={realtime.isConnected}
             sending={sendingText}
-            onSendText={handleSendText}
+            onSendText={onSendText}
           />
         )}
       </main>

@@ -3,7 +3,7 @@ import { ACCESS_COOKIE, verifyAccessToken } from "@/lib/server/access";
 import { readEnv } from "@/lib/server/env";
 import AccessGate from "@/components/AccessGate";
 import ConfigErrorScreen from "@/components/ConfigErrorScreen";
-import VoiceAgentPage from "@/components/VoiceAgentPage";
+import HelionApp from "@/components/HelionApp";
 
 export const dynamic = "force-dynamic";
 
@@ -27,5 +27,5 @@ export default async function Home() {
     return <AccessGate appName={env.appName} />;
   }
 
-  return <VoiceAgentPage appName={env.appName} agentName={env.agentName} />;
+  return <HelionApp appName={env.appName} agentName={env.agentName} />;
 }
