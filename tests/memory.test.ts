@@ -14,6 +14,11 @@ function makeItem(overrides: Partial<MemoryItem> = {}): MemoryItem {
   return {
     id: `mem_${Math.random().toString(36).slice(2)}`,
     profileId: "default",
+    scope: "project_demo",
+    visibility: "shared",
+    ownerProfileId: null,
+    createdByProfileId: null,
+    allowedProfileIds: [],
     type: "semantic",
     title: "Título",
     content: "Contenido",
