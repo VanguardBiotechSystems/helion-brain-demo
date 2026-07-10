@@ -766,6 +766,130 @@ button:disabled {
   color: var(--danger);
 }
 
+/* ── Push to talk ────────────────────────────────────────── */
+
+.ptt-button {
+  min-width: 280px;
+  user-select: none;
+  touch-action: none;
+}
+
+.ptt-button.ptt-active {
+  background: linear-gradient(135deg, #2fb8de 0%, #58d6ff 100%);
+  box-shadow:
+    0 0 0 2px rgba(88, 214, 255, 0.4),
+    0 0 40px rgba(88, 214, 255, 0.5);
+}
+
+/* ── Panel de memoria ────────────────────────────────────── */
+
+.mem-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.mem-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.mem-toggle input {
+  accent-color: var(--accent);
+}
+
+.mem-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.mem-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.mem-recall {
+  margin: 0 0 6px;
+  padding-left: 16px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mem-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mem-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(130, 160, 210, 0.04);
+}
+
+.mem-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.mem-type {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid rgba(88, 214, 255, 0.35);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.mem-meta {
+  font-size: 11px;
+  color: var(--text-faint);
+  flex: 1;
+}
+
+.mem-item-buttons {
+  display: flex;
+  gap: 5px;
+}
+
+.mem-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+
+.mem-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.mem-item-content {
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
 /* ── Pantallas de puerta (passcode / config) ─────────────── */
 
 .gate-screen {

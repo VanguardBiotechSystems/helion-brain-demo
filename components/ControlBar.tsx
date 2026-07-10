@@ -1,8 +1,9 @@
 "use client";
 
-import type { AgentStatus } from "@/lib/shared/types";
+import type { AgentStatus, ListenMode } from "@/lib/shared/types";
 import {
   CaptionsIcon,
+  HandIcon,
   MicIcon,
   MicOffIcon,
   PowerIcon,
@@ -16,6 +17,8 @@ interface ControlBarProps {
   isConnected: boolean;
   muted: boolean;
   showTranscript: boolean;
+  listenMode: ListenMode;
+  pttActive: boolean;
   onConnect: () => void;
   onDisconnect: () => void;
   onToggleMute: () => void;
@@ -23,6 +26,8 @@ interface ControlBarProps {
   onRestart: () => void;
   onToggleTranscript: () => void;
   onClearLog: () => void;
+  onSetListenMode: (mode: ListenMode) => void;
+  onPttChange: (active: boolean) => void;
 }
 
 export default function ControlBar({
@@ -30,6 +35,8 @@ export default function ControlBar({
   isConnected,
   muted,
   showTranscript,
+  listenMode,
+  pttActive,
   onConnect,
   onDisconnect,
   onToggleMute,
@@ -37,16 +44,45 @@ export default function ControlBar({
   onRestart,
   onToggleTranscript,
   onClearLog,
+  onSetListenMode,
+  onPttChange,
 }: ControlBarProps) {
   const busy = status === "connecting" || status === "requesting_mic" || status === "reconnecting";
 
   return (
     <div className="control-bar">
       {isConnected ? (
-        <button className="btn btn-danger-outline btn-main" onClick={onDisconnect}>
-          <PowerIcon size={20} />
-          Finalizar
-        </button>
+        <>
+          {listenMode === "ptt" && (
+            <button
+              className={`btn btn-primary btn-main ptt-button ${pttActive ? "ptt-active" : ""}`}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                onPttChange(true);
+              }}
+              onPointerUp={() => onPttChange(false)}
+              onPointerLeave={() => onPttChange(false)}
+              onPointerCancel={() => onPttChange(false)}
+              onKeyDown={(event) => {
+                if (event.key === " " || event.key === "Enter") {
+                  event.preventDefault();
+                  onPttChange(true);
+                }
+              }}
+              onKeyUp={(event) => {
+                if (event.key === " " || event.key === "Enter") onPttChange(false);
+              }}
+              aria-pressed={pttActive}
+            >
+              <MicIcon size={20} />
+              {pttActive ? "Hablando… (suelta para enviar)" : "Mantén pulsado para hablar"}
+            </button>
+          )}
+          <button className="btn btn-danger-outline btn-main" onClick={onDisconnect}>
+            <PowerIcon size={20} />
+            Finalizar
+          </button>
+        </>
       ) : (
         <button className="btn btn-primary btn-main" onClick={onConnect} disabled={busy}>
           {busy ? <span className="spinner" aria-hidden /> : <PowerIcon size={20} />}
@@ -61,6 +97,24 @@ export default function ControlBar({
       )}
 
       <div className="control-secondary">
+        <button
+          className="icon-btn"
+          onClick={() => onSetListenMode(listenMode === "auto" ? "ptt" : "auto")}
+          aria-pressed={listenMode === "ptt"}
+          aria-label={
+            listenMode === "auto"
+              ? "Cambiar a modo pulsar para hablar"
+              : "Cambiar a escucha automática"
+          }
+          title={
+            listenMode === "auto"
+              ? "Escucha: automática (clic para pulsar-para-hablar)"
+              : "Escucha: pulsar para hablar (clic para automática)"
+          }
+          data-active={listenMode === "ptt"}
+        >
+          <HandIcon />
+        </button>
         <button
           className="icon-btn"
           onClick={onToggleMute}

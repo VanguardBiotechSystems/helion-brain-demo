@@ -9,9 +9,10 @@ import ConnectionStatus, { statusLabel } from "./ConnectionStatus";
 import ControlBar from "./ControlBar";
 import DiagnosticsPanel from "./DiagnosticsPanel";
 import ErrorBanner from "./ErrorBanner";
+import MemoryPanel from "./MemoryPanel";
 import MicLevelVisualizer from "./MicLevelVisualizer";
 import TranscriptPanel from "./TranscriptPanel";
-import { LogoutIcon, WrenchIcon } from "./Icons";
+import { BrainIcon, LogoutIcon, WrenchIcon } from "./Icons";
 
 /**
  * Pantalla principal: orbe de voz + controles + subtítulos + diagnóstico.
@@ -33,6 +34,7 @@ export default function VoiceAgentPage({
 
   const [showTranscript, setShowTranscript] = useState(true);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
   const [sendingText, setSendingText] = useState(false);
 
   const handleSendText = useCallback(
@@ -113,6 +115,15 @@ export default function VoiceAgentPage({
           <ConnectionStatus status={realtime.status} muted={realtime.muted} />
           <button
             className="icon-btn"
+            onClick={() => setShowMemory(true)}
+            aria-label="Abrir memoria"
+            title="Memoria"
+            data-active={realtime.memoryEnabled && realtime.memoryActive}
+          >
+            <BrainIcon />
+          </button>
+          <button
+            className="icon-btn"
             onClick={() => setShowDiagnostics(true)}
             aria-label="Abrir diagnóstico"
             title="Diagnóstico"
@@ -151,6 +162,8 @@ export default function VoiceAgentPage({
             isConnected={realtime.isConnected}
             muted={realtime.muted}
             showTranscript={showTranscript}
+            listenMode={realtime.listenMode}
+            pttActive={realtime.pttActive}
             onConnect={() => void realtime.connect()}
             onDisconnect={realtime.disconnect}
             onToggleMute={realtime.toggleMute}
@@ -158,6 +171,8 @@ export default function VoiceAgentPage({
             onRestart={() => void realtime.restart()}
             onToggleTranscript={() => setShowTranscript((current) => !current)}
             onClearLog={log.clear}
+            onSetListenMode={realtime.setListenMode}
+            onPttChange={realtime.setPttActive}
           />
 
           <p className="stage-note">
@@ -178,6 +193,7 @@ export default function VoiceAgentPage({
       <DiagnosticsPanel
         open={showDiagnostics}
         onClose={() => setShowDiagnostics(false)}
+        onCalibrate={realtime.calibrateAmbient}
         data={{
           sessionInfo: realtime.sessionInfo,
           status: realtime.status,
@@ -189,7 +205,20 @@ export default function VoiceAgentPage({
           eventCount: realtime.eventCount,
           latencyMs: realtime.latencyMs,
           messageCount: log.count,
+          micSettings: realtime.micSettings,
+          gate: realtime.gate,
+          listenMode: realtime.listenMode,
         }}
+      />
+
+      <MemoryPanel
+        open={showMemory}
+        onClose={() => setShowMemory(false)}
+        memoryActive={realtime.memoryActive}
+        onToggleActive={realtime.setMemoryActive}
+        lastRecall={realtime.lastRecall}
+        memorySavedCount={realtime.memorySavedCount}
+        onExtractNow={realtime.extractMemoryNow}
       />
     </div>
   );

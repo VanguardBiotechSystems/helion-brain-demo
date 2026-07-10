@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { AppError } from "@/lib/shared/errors";
-import type { AgentStatus, SessionInfo } from "@/lib/shared/types";
+import type { AgentStatus, ListenMode, MicSettingsInfo, SessionInfo } from "@/lib/shared/types";
 import { statusLabel } from "./ConnectionStatus";
 import { CloseIcon } from "./Icons";
 
@@ -17,6 +17,9 @@ interface DiagnosticsData {
   eventCount: number;
   latencyMs: number | null;
   messageCount: number;
+  micSettings: MicSettingsInfo | null;
+  gate: { state: string; noiseFloor: number; threshold: number; blockedNoises: number; level: number };
+  listenMode: ListenMode;
 }
 
 interface ServerConfig {
@@ -30,6 +33,8 @@ interface ServerConfig {
   elevenLabsConfigured?: boolean;
   elevenLabsVoiceId?: string | null;
   elevenLabsModel?: string;
+  audio?: { profile?: string; noiseReduction?: string; gateEnabled?: boolean };
+  memory?: { enabled?: boolean; provider?: string };
 }
 
 /**
@@ -40,10 +45,12 @@ export default function DiagnosticsPanel({
   open,
   onClose,
   data,
+  onCalibrate,
 }: {
   open: boolean;
   onClose: () => void;
   data: DiagnosticsData;
+  onCalibrate: () => void;
 }) {
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [browserInfo, setBrowserInfo] = useState({ userAgent: "", webrtc: false, online: true });
@@ -129,12 +136,31 @@ export default function DiagnosticsPanel({
 
   const engine = data.sessionInfo?.engine ?? config?.voiceEngine ?? "—";
 
+  const applied = data.micSettings?.applied;
+  const boolLabel = (value: boolean | null | undefined) =>
+    value === true ? "sí" : value === false ? "no" : "desconocido";
+
   const rows: Array<[string, string]> = [
     ["Modelo realtime", model],
     ["Motor de voz", engine],
     ["Voz", voice],
     ["ElevenLabs", config?.elevenLabsConfigured ? `configurado (${config?.elevenLabsModel ?? "—"})` : "sin configurar"],
     ["Detección de turnos", config?.turnDetection ?? "—"],
+    ["Perfil de audio", config?.audio?.profile ?? "—"],
+    ["Reducción de ruido (OpenAI)", config?.audio?.noiseReduction ?? "—"],
+    ["Modo de escucha", data.listenMode === "ptt" ? "pulsar para hablar" : "automático"],
+    ["Micrófono (dispositivo)", data.micSettings?.deviceLabel ?? "—"],
+    [
+      "Constraints aplicadas",
+      applied
+        ? `EC ${boolLabel(applied.echoCancellation)} · NS ${boolLabel(applied.noiseSuppression)} · AGC ${boolLabel(applied.autoGainControl)}`
+        : "—",
+    ],
+    ["Gate local", data.gate.state],
+    ["Nivel RMS actual", data.gate.level.toFixed(4)],
+    ["Ruido de fondo estimado", data.gate.noiseFloor.toFixed(4)],
+    ["Umbral dinámico", Number.isFinite(data.gate.threshold) ? data.gate.threshold.toFixed(4) : "—"],
+    ["Ruidos bloqueados", String(data.gate.blockedNoises)],
     ["Transcripción", config?.transcriptionModel ?? "—"],
     ["Modelo texto (fallback)", config?.textModel ?? "—"],
     ["Estado del agente", statusLabel(data.status)],
@@ -172,6 +198,15 @@ export default function DiagnosticsPanel({
             </div>
           ))}
         </dl>
+
+        <h3 className="diag-subtitle">Escucha</h3>
+        <p className="diag-note">
+          «Escuchando» solo aparece cuando el gate local detecta voz humana sostenida. Si cambias de
+          sala o de ruido de fondo, recalibra.
+        </p>
+        <button className="btn btn-small" onClick={onCalibrate}>
+          Calibrar ambiente
+        </button>
 
         <h3 className="diag-subtitle">Prueba de voz española</h3>
         <p className="diag-note">

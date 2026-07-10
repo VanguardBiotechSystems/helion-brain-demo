@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, verifyAccessToken } from "@/lib/server/access";
 import { readEnv } from "@/lib/server/env";
 import { createRealtimeClientSecret } from "@/lib/server/realtime";
+import { buildSessionMemoryContext, getMemoryStore } from "@/lib/server/memory/service";
 import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
 import { logError } from "@/lib/server/log";
 
@@ -43,7 +44,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const result = await createRealtimeClientSecret(env);
+  // Recuerdos previos para la continuidad entre sesiones. Un fallo de
+  // memoria nunca debe impedir la conversación: se degrada a contexto vacío.
+  let memoryContext = "";
+  if (env.memory.enabled) {
+    try {
+      const store = await getMemoryStore(env);
+      memoryContext = await buildSessionMemoryContext(store, env);
+    } catch (error) {
+      logError("session", "No se pudo construir el contexto de memoria", error);
+    }
+  }
+
+  const result = await createRealtimeClientSecret(env, { memoryContext });
   if (!result.ok) {
     return NextResponse.json({ error: { code: result.code, message: result.message } }, { status: 502 });
   }
@@ -56,5 +69,17 @@ export async function POST(request: NextRequest) {
     agentName: result.agentName,
     baseUrl: env.openaiBaseUrl,
     voiceEngine: env.voiceEngine,
+    audioGate: {
+      enabled: env.audio.gate.enabled,
+      calibrationMs: env.audio.gate.calibrationMs,
+      minSpeechMs: env.audio.gate.minSpeechMs,
+      spikeRejectionMs: env.audio.gate.spikeRejectionMs,
+      thresholdMultiplier: env.audio.gate.thresholdMultiplier,
+      autoGainControl: env.audio.gate.autoGainControl,
+    },
+    memory: {
+      enabled: env.memory.enabled,
+      autoSave: env.memory.autoSave,
+    },
   });
 }

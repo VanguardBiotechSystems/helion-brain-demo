@@ -17,6 +17,9 @@ build/
 # Plataformas
 .vercel
 
+# Memoria local (nunca commitear recuerdos)
+.data/
+
 # Sistema
 .DS_Store
 npm-debug.log*

@@ -7,6 +7,47 @@ import { createHash } from "node:crypto";
  */
 
 export type VoiceEngine = "openai_realtime" | "elevenlabs";
+export type AudioProfile = "laptop_demo" | "near_field" | "far_field" | "robot_room";
+export type TurnDetectionMode = "semantic_vad" | "server_vad";
+export type NoiseReductionMode = "near_field" | "far_field" | "off";
+export type VadEagerness = "low" | "medium" | "high" | "auto";
+export type MemoryProvider = "local" | "postgres";
+
+export interface AudioGateEnvConfig {
+  enabled: boolean;
+  calibrationMs: number;
+  minSpeechMs: number;
+  spikeRejectionMs: number;
+  thresholdMultiplier: number;
+  /** AGC del navegador: apagado por defecto para no amplificar ruido. */
+  autoGainControl: boolean;
+}
+
+export interface AudioConfig {
+  profile: AudioProfile;
+  turnDetection: TurnDetectionMode;
+  vadThreshold: number;
+  vadSilenceMs: number;
+  vadPrefixPaddingMs: number;
+  vadEagerness: VadEagerness;
+  noiseReduction: NoiseReductionMode;
+  gate: AudioGateEnvConfig;
+}
+
+export interface MemoryConfig {
+  enabled: boolean;
+  provider: MemoryProvider;
+  databaseUrl: string;
+  localPath: string;
+  embeddingModel: string;
+  extractionModel: string;
+  retrievalTopK: number;
+  minImportance: number;
+  autoSave: boolean;
+  requireConfirmationForSensitive: boolean;
+  retentionDays: number | null;
+  debug: boolean;
+}
 
 export interface AppEnv {
   openaiApiKey: string;
@@ -16,7 +57,6 @@ export interface AppEnv {
   transcriptionModel: string;
   /** ISO-639-1; cadena vacía = autodetección. */
   transcriptionLanguage: string;
-  turnDetection: "semantic_vad" | "server_vad";
   textModel: string;
   accessPassword: string;
   sessionSecret: string;
@@ -28,6 +68,8 @@ export interface AppEnv {
   elevenLabsVoiceId: string;
   elevenLabsModel: string;
   elevenLabsOutputFormat: string;
+  audio: AudioConfig;
+  memory: MemoryConfig;
 }
 
 export interface EnvResult {
@@ -37,10 +79,133 @@ export interface EnvResult {
 
 const REQUIRED = ["OPENAI_API_KEY", "APP_ACCESS_PASSWORD"] as const;
 
+/**
+ * Perfiles de escucha. Un perfil define valores razonables para el VAD de
+ * OpenAI y la reducción de ruido; cualquier variable individual (OPENAI_*)
+ * los sobreescribe. Ver docs/AUDIO_GATE.md.
+ *
+ * - laptop_demo (por defecto): demo en portátil cerca del usuario.
+ *   server_vad conservador (umbral 0.6, 700 ms de silencio) + near_field.
+ * - near_field: micro cercano con turnos naturales (semantic_vad).
+ * - far_field / robot_room: micro lejano en habitación; VAD más exigente.
+ */
+const AUDIO_PROFILES: Record<
+  AudioProfile,
+  Pick<AudioConfig, "turnDetection" | "vadThreshold" | "vadSilenceMs" | "vadPrefixPaddingMs" | "vadEagerness" | "noiseReduction">
+> = {
+  laptop_demo: {
+    turnDetection: "server_vad",
+    vadThreshold: 0.6,
+    vadSilenceMs: 700,
+    vadPrefixPaddingMs: 300,
+    vadEagerness: "low",
+    noiseReduction: "near_field",
+  },
+  near_field: {
+    turnDetection: "semantic_vad",
+    vadThreshold: 0.55,
+    vadSilenceMs: 600,
+    vadPrefixPaddingMs: 300,
+    vadEagerness: "auto",
+    noiseReduction: "near_field",
+  },
+  far_field: {
+    turnDetection: "server_vad",
+    vadThreshold: 0.65,
+    vadSilenceMs: 800,
+    vadPrefixPaddingMs: 400,
+    vadEagerness: "low",
+    noiseReduction: "far_field",
+  },
+  robot_room: {
+    turnDetection: "server_vad",
+    vadThreshold: 0.65,
+    vadSilenceMs: 800,
+    vadPrefixPaddingMs: 400,
+    vadEagerness: "low",
+    noiseReduction: "far_field",
+  },
+};
+
 function deriveFallbackSecret(accessPassword: string): string {
   // Derivación determinista para poder firmar cookies sin SESSION_SECRET.
   // Menos robusto que un secreto independiente: se documenta en README.
   return createHash("sha256").update(`helion-session-v1:${accessPassword}`).digest("hex");
+}
+
+function parseNumber(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const value = Number(raw?.trim());
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
+  const value = raw?.trim().toLowerCase();
+  if (value === "true" || value === "1" || value === "yes") return true;
+  if (value === "false" || value === "0" || value === "no") return false;
+  return fallback;
+}
+
+function parseEnum<T extends string>(raw: string | undefined, allowed: readonly T[], fallback: T): T {
+  const value = raw?.trim() as T | undefined;
+  return value && allowed.includes(value) ? value : fallback;
+}
+
+function readAudioConfig(source: Record<string, string | undefined>): AudioConfig {
+  const profile = parseEnum<AudioProfile>(
+    source.AUDIO_PROFILE,
+    ["laptop_demo", "near_field", "far_field", "robot_room"],
+    "laptop_demo",
+  );
+  const preset = AUDIO_PROFILES[profile];
+
+  return {
+    profile,
+    turnDetection: parseEnum<TurnDetectionMode>(
+      source.OPENAI_TURN_DETECTION,
+      ["semantic_vad", "server_vad"],
+      preset.turnDetection,
+    ),
+    vadThreshold: parseNumber(source.OPENAI_VAD_THRESHOLD, preset.vadThreshold, 0, 1),
+    vadSilenceMs: parseNumber(source.OPENAI_VAD_SILENCE_MS, preset.vadSilenceMs, 100, 5000),
+    vadPrefixPaddingMs: parseNumber(source.OPENAI_VAD_PREFIX_PADDING_MS, preset.vadPrefixPaddingMs, 0, 2000),
+    vadEagerness: parseEnum<VadEagerness>(
+      source.OPENAI_VAD_EAGERNESS,
+      ["low", "medium", "high", "auto"],
+      preset.vadEagerness,
+    ),
+    noiseReduction: parseEnum<NoiseReductionMode>(
+      source.OPENAI_NOISE_REDUCTION,
+      ["near_field", "far_field", "off"],
+      preset.noiseReduction,
+    ),
+    gate: {
+      enabled: parseBoolean(source.LOCAL_AUDIO_GATE_ENABLED, true),
+      calibrationMs: parseNumber(source.LOCAL_AUDIO_CALIBRATION_MS, 2000, 500, 10000),
+      minSpeechMs: parseNumber(source.LOCAL_AUDIO_MIN_SPEECH_MS, 300, 100, 2000),
+      spikeRejectionMs: parseNumber(source.LOCAL_AUDIO_SPIKE_REJECTION_MS, 180, 40, 1000),
+      thresholdMultiplier: parseNumber(source.LOCAL_AUDIO_THRESHOLD_MULTIPLIER, 2.5, 1.2, 10),
+      autoGainControl: parseBoolean(source.LOCAL_AUDIO_AGC, false),
+    },
+  };
+}
+
+function readMemoryConfig(source: Record<string, string | undefined>): MemoryConfig {
+  const retentionRaw = parseNumber(source.MEMORY_RETENTION_DAYS, 0, 0, 36500);
+  return {
+    enabled: parseBoolean(source.MEMORY_ENABLED, true),
+    provider: parseEnum<MemoryProvider>(source.MEMORY_PROVIDER, ["local", "postgres"], "local"),
+    databaseUrl: source.DATABASE_URL?.trim() ?? "",
+    localPath: source.MEMORY_LOCAL_PATH?.trim() || ".data/memory.json",
+    embeddingModel: source.MEMORY_EMBEDDING_MODEL?.trim() || "text-embedding-3-small",
+    extractionModel: source.MEMORY_EXTRACTION_MODEL?.trim() || "gpt-4.1-mini",
+    retrievalTopK: parseNumber(source.MEMORY_RETRIEVAL_TOP_K, 8, 1, 50),
+    minImportance: parseNumber(source.MEMORY_MIN_IMPORTANCE, 0.55, 0, 1),
+    autoSave: parseBoolean(source.MEMORY_AUTO_SAVE, true),
+    requireConfirmationForSensitive: parseBoolean(source.MEMORY_REQUIRE_CONFIRMATION_FOR_SENSITIVE, true),
+    retentionDays: retentionRaw > 0 ? retentionRaw : null,
+    debug: parseBoolean(source.MEMORY_DEBUG, false),
+  };
 }
 
 export function readEnv(source: Record<string, string | undefined> = process.env): EnvResult {
@@ -53,6 +218,11 @@ export function readEnv(source: Record<string, string | undefined> = process.env
   if (voiceEngine === "elevenlabs") {
     if (!source.ELEVENLABS_API_KEY?.trim()) missing.push("ELEVENLABS_API_KEY");
     if (!source.ELEVENLABS_VOICE_ID?.trim()) missing.push("ELEVENLABS_VOICE_ID");
+  }
+
+  const memory = readMemoryConfig(source);
+  if (memory.enabled && memory.provider === "postgres" && !memory.databaseUrl) {
+    missing.push("DATABASE_URL");
   }
 
   if (missing.length > 0) {
@@ -74,7 +244,6 @@ export function readEnv(source: Record<string, string | undefined> = process.env
       realtimeVoice: source.OPENAI_REALTIME_VOICE?.trim() || "cedar",
       transcriptionModel: source.OPENAI_TRANSCRIPTION_MODEL?.trim() || "gpt-4o-mini-transcribe",
       transcriptionLanguage,
-      turnDetection: source.OPENAI_TURN_DETECTION?.trim() === "server_vad" ? "server_vad" : "semantic_vad",
       textModel: source.OPENAI_TEXT_MODEL?.trim() || "gpt-4.1-mini",
       accessPassword,
       sessionSecret: source.SESSION_SECRET?.trim() || deriveFallbackSecret(accessPassword),
@@ -85,6 +254,8 @@ export function readEnv(source: Record<string, string | undefined> = process.env
       elevenLabsVoiceId: source.ELEVENLABS_VOICE_ID?.trim() ?? "",
       elevenLabsModel: source.ELEVENLABS_MODEL?.trim() || "eleven_flash_v2_5",
       elevenLabsOutputFormat: source.ELEVENLABS_OUTPUT_FORMAT?.trim() || "mp3_44100_128",
+      audio: readAudioConfig(source),
+      memory,
     },
     missing: [],
   };

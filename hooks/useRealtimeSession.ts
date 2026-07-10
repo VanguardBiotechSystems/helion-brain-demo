@@ -2,7 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toAppError, type AppError, type ErrorCode } from "@/lib/shared/errors";
-import type { AgentStatus, SessionInfo, SessionResponse, VoiceEngine } from "@/lib/shared/types";
+import type {
+  AgentStatus,
+  ClientGateConfig,
+  ListenMode,
+  MemorySummary,
+  MicSettingsInfo,
+  SessionInfo,
+  SessionResponse,
+  VoiceEngine,
+} from "@/lib/shared/types";
 import { mockRobot } from "@/lib/robot/mockAdapter";
 import type { RobotCommand } from "@/lib/robot/types";
 import {
@@ -10,21 +19,44 @@ import {
   SIMULATED_GESTURES,
   type SimulatedGesture,
 } from "@/lib/robot/tools";
+import { MEMORY_TOOL_NAMES } from "@/lib/server/memory/tools";
+import { useAudioGate } from "./useAudioGate";
 import type { ConversationLog } from "./useConversationLog";
 
 /**
  * Máquina de estados de la sesión de voz en tiempo real (WebRTC + OpenAI Realtime).
  *
- * Flujo: getUserMedia → POST /api/session (token efímero, la API key nunca
- * llega aquí) → RTCPeerConnection + data channel "oai-events" → SDP offer a
- * OpenAI → audio bidireccional. Los eventos del data channel actualizan el
- * estado (escuchando / pensando / hablando), los subtítulos y las
- * herramientas simuladas del robot.
+ * Escucha disciplinada (ver docs/AUDIO_GATE.md): el stream original del
+ * micrófono se queda en el navegador para análisis; al modelo solo viaja un
+ * CLON de la pista, que permanece silenciado salvo que el gate local
+ * confirme voz humana sostenida (o que el usuario use pulsar-para-hablar).
+ * "Escuchando" en la UI significa "creo que alguien está hablando", no
+ * "tengo permiso de micrófono".
+ *
+ * Memoria (ver docs/MEMORY_ARCHITECTURE.md): al crear la sesión el servidor
+ * inyecta recuerdos previos; durante la conversación se recuperan recuerdos
+ * por turno, se acumulan intercambios para el Memory Curator y el modelo
+ * dispone de herramientas memory_save / memory_recall / memory_forget.
  */
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const CONNECT_TIMEOUT_MS = 20000;
 const DISCONNECT_GRACE_MS = 3000;
+/** Estados en los que se puede re-derivar el estado "de reposo". */
+const READY_STATUSES: ReadonlySet<AgentStatus> = new Set([
+  "calibrating",
+  "standby",
+  "voice_detected",
+  "listening",
+]);
+const CONNECTED_STATUSES: ReadonlySet<AgentStatus> = new Set([
+  "calibrating",
+  "standby",
+  "voice_detected",
+  "listening",
+  "thinking",
+  "speaking",
+]);
 
 interface RealtimeServerEvent {
   type: string;
@@ -50,9 +82,7 @@ interface ApiErrorBody {
 
 /** Error interno con código de la taxonomía, para propagar por el flujo de conexión. */
 class SessionError extends Error {
-  constructor(
-    public appError: AppError,
-  ) {
+  constructor(public appError: AppError) {
     super(appError.message);
   }
 }
@@ -91,12 +121,6 @@ const RETRYABLE_ON_RECONNECT: ReadonlySet<string> = new Set([
   "unknown",
 ]);
 
-function requestTimeoutSignal(ms: number): AbortSignal | undefined {
-  return typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
-    ? AbortSignal.timeout(ms)
-    : undefined;
-}
-
 function isKnownErrorCode(code: unknown): code is ErrorCode {
   return (
     typeof code === "string" &&
@@ -114,6 +138,25 @@ function isKnownErrorCode(code: unknown): code is ErrorCode {
   );
 }
 
+function requestTimeoutSignal(ms: number): AbortSignal | undefined {
+  return typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
+    ? AbortSignal.timeout(ms)
+    : undefined;
+}
+
+export interface GateDiagnostics {
+  state: string;
+  noiseFloor: number;
+  threshold: number;
+  blockedNoises: number;
+  level: number;
+}
+
+interface ExchangeMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface RealtimeSession {
   status: AgentStatus;
   error: AppError | null;
@@ -126,6 +169,14 @@ export interface RealtimeSession {
   agentStream: MediaStream | null;
   connectionState: string;
   dataChannelState: string;
+  micSettings: MicSettingsInfo | null;
+  listenMode: ListenMode;
+  pttActive: boolean;
+  gate: GateDiagnostics;
+  memoryEnabled: boolean;
+  memoryActive: boolean;
+  lastRecall: MemorySummary[];
+  memorySavedCount: number;
   connect(): Promise<void>;
   disconnect(): void;
   restart(): Promise<void>;
@@ -134,6 +185,11 @@ export interface RealtimeSession {
   sendText(text: string): boolean;
   resumeAudio(): void;
   clearError(): void;
+  setListenMode(mode: ListenMode): void;
+  setPttActive(active: boolean): void;
+  calibrateAmbient(): void;
+  extractMemoryNow(): Promise<void>;
+  setMemoryActive(active: boolean): void;
 }
 
 export function useRealtimeSession(log: ConversationLog): RealtimeSession {
@@ -147,13 +203,27 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   const [agentStream, setAgentStream] = useState<MediaStream | null>(null);
   const [connectionState, setConnectionState] = useState("new");
   const [dataChannelState, setDataChannelState] = useState("closed");
+  const [micSettings, setMicSettings] = useState<MicSettingsInfo | null>(null);
+  const [listenMode, setListenModeState] = useState<ListenMode>("auto");
+  const [pttActive, setPttActiveState] = useState(false);
+  const [audioGateConfig, setAudioGateConfig] = useState<ClientGateConfig | null>(null);
+  const [memoryEnabled, setMemoryEnabled] = useState(false);
+  const [memoryActive, setMemoryActiveState] = useState(true);
+  const [lastRecall, setLastRecall] = useState<MemorySummary[]>([]);
+  const [memorySavedCount, setMemorySavedCount] = useState(0);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
+  const sendTrackRef = useRef<MediaStreamTrack | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const statusRef = useRef<AgentStatus>("idle");
   const mutedRef = useRef(false);
+  const listenModeRef = useRef<ListenMode>("auto");
+  const pttActiveRef = useRef(false);
+  const gateOpenRef = useRef(false);
+  const gateStateRef = useRef<string>("off");
+  const gateEnabledRef = useRef(false);
   const intentionalCloseRef = useRef(false);
   const connectingRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
@@ -169,6 +239,13 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   // Contador de generación: cualquier cancelación (barge-in, cortar voz,
   // reconexión) o una síntesis más nueva invalida las síntesis en vuelo.
   const ttsEpochRef = useRef(0);
+  // Memoria: intercambios pendientes de curar y recuerdos ya inyectados.
+  const memoryEnabledRef = useRef(false);
+  const memoryActiveRef = useRef(true);
+  const memoryAutoSaveRef = useRef(false);
+  const exchangesRef = useRef<ExchangeMessage[]>([]);
+  const extractWatermarkRef = useRef(0);
+  const injectedMemoryIdsRef = useRef(new Set<string>());
   const logRef = useRef(log);
 
   logRef.current = log;
@@ -193,6 +270,67 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     statusRef.current = next;
     setStatus(next);
   }, []);
+
+  /**
+   * Estado "de reposo" según el modo de escucha y el gate local.
+   * Es la semántica visible: "Escuchando" = voz detectada, no micro abierto.
+   */
+  const deriveReadyStatus = useCallback((): AgentStatus => {
+    if (mutedRef.current) return "standby";
+    if (listenModeRef.current === "ptt") return pttActiveRef.current ? "listening" : "standby";
+    if (!gateEnabledRef.current) return "listening";
+    switch (gateStateRef.current) {
+      case "calibrating":
+        return "calibrating";
+      case "candidate":
+        return "voice_detected";
+      case "open":
+      case "hangover":
+        return "listening";
+      default:
+        return "standby";
+    }
+  }, []);
+
+  const applyReadyStatus = useCallback(() => {
+    if (!READY_STATUSES.has(statusRef.current)) return;
+    const next = deriveReadyStatus();
+    if (next !== statusRef.current) setStatusSafe(next);
+  }, [deriveReadyStatus, setStatusSafe]);
+
+  /** El clon enviado al modelo solo se activa cuando toca hablar. */
+  const updateSendEnabled = useCallback(() => {
+    const track = sendTrackRef.current;
+    if (!track) return;
+    let shouldSend: boolean;
+    if (listenModeRef.current === "ptt") {
+      shouldSend = pttActiveRef.current;
+    } else {
+      shouldSend = gateEnabledRef.current ? gateOpenRef.current : true;
+    }
+    track.enabled = shouldSend && !mutedRef.current;
+  }, []);
+
+  const handleGateOpenChange = useCallback(
+    (open: boolean) => {
+      gateOpenRef.current = open;
+      updateSendEnabled();
+      applyReadyStatus();
+    },
+    [applyReadyStatus, updateSendEnabled],
+  );
+
+  const gateHook = useAudioGate(
+    micStream,
+    audioGateConfig,
+    listenMode === "auto",
+    handleGateOpenChange,
+  );
+
+  useEffect(() => {
+    gateStateRef.current = gateHook.gateState;
+    applyReadyStatus();
+  }, [gateHook.gateState, applyReadyStatus]);
 
   const cleanupPeer = useCallback((keepMic: boolean) => {
     if (connectTimeoutRef.current) {
@@ -222,6 +360,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         // ya cerrado
       }
     }
+    sendTrackRef.current?.stop();
+    sendTrackRef.current = null;
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.srcObject = null;
@@ -286,8 +426,6 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   const playTtsAudio = useCallback(
     async (text: string) => {
       if (engineRef.current !== "elevenlabs" || !text.trim()) return;
-      // La síntesis más nueva invalida cualquier otra en vuelo; si durante
-      // los await el usuario interrumpe/corta/reconecta, se descarta.
       const epoch = ++ttsEpochRef.current;
       try {
         setStatusSafe("thinking"); // preparando voz
@@ -302,7 +440,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           const body = (await response.json().catch(() => null)) as ApiErrorBody | null;
           const code = body?.error?.code;
           setError(toAppError(isKnownErrorCode(code) ? code : "tts_failed", body?.error?.message));
-          setStatusSafe("listening");
+          setStatusSafe(deriveReadyStatus());
           return;
         }
         const blob = await response.blob();
@@ -314,9 +452,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         ttsUrlRef.current = url;
         element.srcObject = null;
         element.src = url;
-        element.onended = () => setStatusSafe("listening");
-        // Nivel de voz para el orbe: captura el stream del elemento si el
-        // navegador lo soporta (si no, el orbe anima por estado).
+        element.onended = () => setStatusSafe(deriveReadyStatus());
         if (!ttsStreamRef.current) {
           const capturable = element as HTMLAudioElement & {
             captureStream?: () => MediaStream;
@@ -347,10 +483,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         } else {
           setError(toAppError("tts_failed"));
         }
-        setStatusSafe("listening");
+        setStatusSafe(deriveReadyStatus());
       }
     },
-    [ensureAudioElement, recordLatency, setStatusSafe],
+    [deriveReadyStatus, ensureAudioElement, recordLatency, setStatusSafe],
   );
 
   /** Cancela la respuesta activa (generación y audio) sea cual sea el motor. */
@@ -363,13 +499,170 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     }
   }, [sendEvent, stopTtsPlayback]);
 
+  // ── Memoria ────────────────────────────────────────────────────────────
+
+  const recordExchange = useCallback((role: "user" | "assistant", content: string) => {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    exchangesRef.current.push({ role, content: trimmed.slice(0, 2000) });
+    if (exchangesRef.current.length > 40) {
+      const drop = exchangesRef.current.length - 40;
+      exchangesRef.current.splice(0, drop);
+      extractWatermarkRef.current = Math.max(0, extractWatermarkRef.current - drop);
+    }
+  }, []);
+
+  /** El Memory Curator analiza el tramo pendiente cada pocos turnos. */
+  const maybeExtractMemory = useCallback(async (force: boolean): Promise<void> => {
+    if (!memoryEnabledRef.current || !memoryActiveRef.current || !memoryAutoSaveRef.current) return;
+    const pending = exchangesRef.current.slice(extractWatermarkRef.current);
+    const assistantTurns = pending.filter((message) => message.role === "assistant").length;
+    if (pending.length === 0 || (!force && assistantTurns < 2)) return;
+    extractWatermarkRef.current = exchangesRef.current.length;
+    try {
+      const response = await fetch("/api/memory/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: pending.slice(-12) }),
+      });
+      if (!response.ok) return;
+      const data = (await response.json().catch(() => null)) as { saved?: unknown[] } | null;
+      if (data?.saved?.length) setMemorySavedCount((count) => count + data.saved!.length);
+    } catch {
+      // la memoria nunca rompe la conversación
+    }
+  }, []);
+
+  /** Recupera recuerdos relevantes al turno y los inyecta como contexto. */
+  const maybeInjectMemories = useCallback(
+    async (transcript: string): Promise<void> => {
+      if (!memoryEnabledRef.current || !memoryActiveRef.current) return;
+      const query = transcript.trim();
+      if (query.length < 8) return;
+      try {
+        const response = await fetch("/api/memory/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, topK: 4 }),
+        });
+        if (!response.ok) return;
+        const data = (await response.json().catch(() => null)) as { results?: MemorySummary[] } | null;
+        const results = data?.results ?? [];
+        setLastRecall(results.slice(0, 6));
+        const fresh = results.filter(
+          (memory) => !injectedMemoryIdsRef.current.has(memory.id) && (memory.score ?? 0) > 0.35,
+        );
+        if (fresh.length === 0) return;
+        fresh.forEach((memory) => injectedMemoryIdsRef.current.add(memory.id));
+        const block = fresh.map((memory) => `- (${memory.type}) ${memory.content}`).join("\n");
+        sendEvent({
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "system",
+            content: [
+              {
+                type: "input_text",
+                text: `Recuerdos recuperados de la memoria persistente (contexto, no los cites literalmente):\n${block}`,
+              },
+            ],
+          },
+        });
+      } catch {
+        // la memoria nunca rompe la conversación
+      }
+    },
+    [sendEvent],
+  );
+
+  const handleMemoryTool = useCallback(
+    async (name: string, argsJson: string | undefined): Promise<Record<string, unknown>> => {
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(argsJson || "{}") as Record<string, unknown>;
+      } catch {
+        args = {};
+      }
+      try {
+        if (name === MEMORY_TOOL_NAMES.save) {
+          const response = await fetch("/api/memory", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: args.content,
+              type: args.type,
+              sensitivity: args.sensitivity,
+            }),
+          });
+          const body = (await response.json().catch(() => null)) as {
+            item?: { title?: string };
+            deduplicatedInto?: string | null;
+            error?: { message?: string };
+          } | null;
+          if (!response.ok) {
+            return { saved: false, reason: body?.error?.message ?? "No se pudo guardar." };
+          }
+          setMemorySavedCount((count) => count + 1);
+          return {
+            saved: true,
+            title: body?.item?.title ?? "",
+            updatedExisting: Boolean(body?.deduplicatedInto),
+          };
+        }
+        if (name === MEMORY_TOOL_NAMES.recall) {
+          const response = await fetch("/api/memory/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: args.query, topK: 6 }),
+          });
+          const body = (await response.json().catch(() => null)) as { results?: MemorySummary[] } | null;
+          if (!response.ok) return { memories: [], note: "Memoria no disponible ahora mismo." };
+          const results = body?.results ?? [];
+          setLastRecall(results.slice(0, 6));
+          return {
+            memories: results.map((memory) => ({
+              type: memory.type,
+              title: memory.title,
+              content: memory.content,
+              updatedAt: memory.updatedAt,
+            })),
+          };
+        }
+        if (name === MEMORY_TOOL_NAMES.forget) {
+          const response = await fetch("/api/memory/forget", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: args.query }),
+          });
+          const body = (await response.json().catch(() => null)) as {
+            archived?: Array<{ title: string }>;
+          } | null;
+          if (!response.ok) return { archived: [], note: "Memoria no disponible ahora mismo." };
+          return { archived: (body?.archived ?? []).map((memory) => memory.title) };
+        }
+      } catch {
+        return { error: "La memoria no está disponible ahora mismo." };
+      }
+      return { error: `Herramienta de memoria desconocida: ${name}` };
+    },
+    [],
+  );
+
+  // ── Herramientas (robot simulado + memoria) ───────────────────────────
+
   const handleFunctionCall = useCallback(
     async (name: string | undefined, callId: string | undefined, argsJson: string | undefined) => {
       if (!callId || processedCallsRef.current.has(callId)) return;
       processedCallsRef.current.add(callId);
 
       let output: Record<string, unknown>;
-      if (name === ROBOT_GESTURE_TOOL_NAME) {
+      if (
+        name === MEMORY_TOOL_NAMES.save ||
+        name === MEMORY_TOOL_NAMES.recall ||
+        name === MEMORY_TOOL_NAMES.forget
+      ) {
+        output = await handleMemoryTool(name, argsJson);
+      } else if (name === ROBOT_GESTURE_TOOL_NAME) {
         let parsed: { gesture?: string; detail?: string } = {};
         try {
           parsed = JSON.parse(argsJson || "{}") as { gesture?: string; detail?: string };
@@ -408,8 +701,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       });
       sendEvent({ type: "response.create" });
     },
-    [sendEvent],
+    [handleMemoryTool, sendEvent],
   );
+
+  // ── Eventos del data channel ───────────────────────────────────────────
 
   const handleServerEvent = useCallback(
     (raw: string) => {
@@ -442,7 +737,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
 
         case "conversation.item.input_audio_transcription.completed":
           if (event.item_id) {
-            logRef.current.finalizeUser(event.item_id, event.transcript ?? "");
+            const transcript = event.transcript ?? "";
+            logRef.current.finalizeUser(event.item_id, transcript);
+            recordExchange("user", transcript);
+            void maybeInjectMemories(transcript);
           }
           break;
 
@@ -462,7 +760,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
 
         case "response.output_audio_transcript.done":
         case "response.audio_transcript.done":
-          if (event.response_id) logRef.current.finalizeAgent(event.response_id, event.transcript);
+          if (event.response_id) {
+            logRef.current.finalizeAgent(event.response_id, event.transcript);
+            recordExchange("assistant", event.transcript ?? "");
+            void maybeExtractMemory(false);
+          }
           break;
 
         // Modo elevenlabs: la respuesta llega como texto (se sintetiza al
@@ -480,6 +782,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         case "response.output_text.done":
           if (event.response_id) {
             logRef.current.finalizeAgent(event.response_id, event.text);
+            recordExchange("assistant", event.text ?? "");
+            void maybeExtractMemory(false);
             if (typeof event.text === "string" && event.text.trim()) {
               textBufferRef.current.set(event.response_id, event.text);
             }
@@ -493,7 +797,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
 
         case "output_audio_buffer.stopped":
         case "output_audio_buffer.cleared":
-          setStatusSafe("listening");
+          setStatusSafe(deriveReadyStatus());
           break;
 
         case "response.function_call_arguments.done":
@@ -506,9 +810,6 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
               void handleFunctionCall(item.name, item.call_id, item.arguments);
             }
           }
-          // Modo elevenlabs: al completarse la respuesta textual, se
-          // sintetiza y reproduce. Las respuestas canceladas (barge-in)
-          // no se hablan.
           const responseId = event.response?.id;
           if (engineRef.current === "elevenlabs" && responseId) {
             const text = textBufferRef.current.get(responseId) ?? "";
@@ -518,8 +819,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
               break;
             }
           }
-          // Si la respuesta no produjo audio, vuelve a escuchar.
-          if (statusRef.current === "thinking") setStatusSafe("listening");
+          // Si la respuesta no produjo audio, vuelve al estado de reposo.
+          if (statusRef.current === "thinking") setStatusSafe(deriveReadyStatus());
           break;
         }
 
@@ -537,10 +838,22 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           break;
       }
     },
-    [handleFunctionCall, playTtsAudio, recordLatency, setStatusSafe, stopTtsPlayback],
+    [
+      deriveReadyStatus,
+      handleFunctionCall,
+      maybeExtractMemory,
+      maybeInjectMemories,
+      playTtsAudio,
+      recordExchange,
+      recordLatency,
+      setStatusSafe,
+      stopTtsPlayback,
+    ],
   );
 
   const scheduleReconnectRef = useRef<() => void>(() => {});
+
+  // ── Conexión ───────────────────────────────────────────────────────────
 
   const connectInternal = useCallback(
     async (isReconnect: boolean) => {
@@ -559,34 +872,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       setError(null);
 
       try {
-        // 1) Micrófono (se reutiliza en reconexiones si sigue vivo).
-        let stream = micStreamRef.current;
-        const streamAlive = stream?.getAudioTracks().some((t) => t.readyState === "live") ?? false;
-        if (!stream || !streamAlive) {
-          setStatus("requesting_mic");
-          statusRef.current = "requesting_mic";
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-            });
-          } catch (mediaError) {
-            const name = mediaError instanceof DOMException ? mediaError.name : "";
-            if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
-              throw new SessionError(toAppError("mic_permission"));
-            }
-            if (name === "NotFoundError" || name === "DevicesNotFoundError" || name === "OverconstrainedError") {
-              throw new SessionError(toAppError("mic_unavailable"));
-            }
-            throw new SessionError(toAppError("unknown", "No se pudo acceder al micrófono."));
-          }
-          micStreamRef.current = stream;
-          setMicStream(stream);
-        }
-        stream.getAudioTracks().forEach((track) => {
-          track.enabled = !mutedRef.current;
-        });
-
-        // 2) Sesión efímera desde nuestro servidor (la API key no sale de él).
+        // 1) Sesión efímera desde nuestro servidor: trae también la
+        //    configuración del gate local y de memoria.
         setStatus("connecting");
         statusRef.current = "connecting";
         const sessionResponse = await fetch("/api/session", {
@@ -603,6 +890,12 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         }
         const session = (await sessionResponse.json()) as SessionResponse;
         engineRef.current = session.voiceEngine ?? "openai_realtime";
+        const gateCfg = session.audioGate ?? null;
+        gateEnabledRef.current = gateCfg?.enabled ?? false;
+        setAudioGateConfig(gateCfg);
+        memoryEnabledRef.current = session.memory?.enabled ?? false;
+        memoryAutoSaveRef.current = session.memory?.autoSave ?? false;
+        setMemoryEnabled(memoryEnabledRef.current);
         setSessionInfo({
           model: session.model,
           voice: session.voice,
@@ -610,7 +903,52 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           engine: engineRef.current,
         });
 
+        // 2) Micrófono (se reutiliza en reconexiones si sigue vivo).
+        //    AGC desactivado por defecto: no amplificar ruido de fondo.
+        let stream = micStreamRef.current;
+        const streamAlive = stream?.getAudioTracks().some((t) => t.readyState === "live") ?? false;
+        if (!stream || !streamAlive) {
+          setStatus("requesting_mic");
+          statusRef.current = "requesting_mic";
+          const requested = {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: gateCfg?.autoGainControl ?? false,
+          };
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: { ...requested, channelCount: 1 },
+            });
+          } catch (mediaError) {
+            const name = mediaError instanceof DOMException ? mediaError.name : "";
+            if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
+              throw new SessionError(toAppError("mic_permission"));
+            }
+            if (name === "NotFoundError" || name === "DevicesNotFoundError" || name === "OverconstrainedError") {
+              throw new SessionError(toAppError("mic_unavailable"));
+            }
+            throw new SessionError(toAppError("unknown", "No se pudo acceder al micrófono."));
+          }
+          micStreamRef.current = stream;
+          setMicStream(stream);
+          // Diagnóstico: constraints pedidas vs realmente aplicadas.
+          const track = stream.getAudioTracks()[0];
+          const applied = track?.getSettings() ?? {};
+          setMicSettings({
+            deviceLabel: track?.label || "desconocido",
+            requested,
+            applied: {
+              echoCancellation: applied.echoCancellation ?? null,
+              noiseSuppression: applied.noiseSuppression ?? null,
+              autoGainControl: applied.autoGainControl ?? null,
+              sampleRate: applied.sampleRate ?? null,
+            },
+          });
+        }
+
         // 3) WebRTC hacia OpenAI con el token efímero.
+        setStatus("connecting");
+        statusRef.current = "connecting";
         const pc = new RTCPeerConnection();
         pcRef.current = pc;
 
@@ -644,9 +982,15 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           });
         };
 
-        for (const track of stream.getAudioTracks()) {
-          pc.addTrack(track, stream);
+        // Al modelo viaja un CLON gateado; el original queda para análisis.
+        const sourceTrack = stream.getAudioTracks()[0];
+        if (!sourceTrack) {
+          throw new SessionError(toAppError("mic_unavailable"));
         }
+        const senderTrack = sourceTrack.clone();
+        sendTrackRef.current = senderTrack;
+        pc.addTrack(senderTrack, new MediaStream([senderTrack]));
+        updateSendEnabled();
 
         const dc = pc.createDataChannel("oai-events");
         dcRef.current = dc;
@@ -654,10 +998,15 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           if (dcRef.current !== dc) return;
           setDataChannelState("open");
           reconnectAttemptsRef.current = 0;
-          statusRef.current = "listening";
-          setStatus("listening");
+          const ready = deriveReadyStatus();
+          statusRef.current = ready;
+          setStatus(ready);
           logRef.current.addSystem(
-            isReconnect ? "Reconectado. Puedes seguir hablando." : `Sesión de voz iniciada con ${session.agentName}.`,
+            isReconnect
+              ? "Reconectado. Puedes seguir hablando."
+              : gateEnabledRef.current && listenModeRef.current === "auto"
+                ? `Sesión de voz iniciada con ${session.agentName}. Calibrando el ruido ambiente…`
+                : `Sesión de voz iniciada con ${session.agentName}.`,
           );
         };
         dc.onmessage = (messageEvent) => handleServerEvent(String(messageEvent.data));
@@ -719,7 +1068,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         connectingRef.current = false;
       }
     },
-    [cleanupPeer, ensureAudioElement, handleServerEvent],
+    [cleanupPeer, deriveReadyStatus, ensureAudioElement, handleServerEvent, updateSendEnabled],
   );
 
   const scheduleReconnect = useCallback(() => {
@@ -763,6 +1112,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
 
   const disconnect = useCallback(() => {
     intentionalCloseRef.current = true;
+    // Último barrido del curador antes de cerrar (si hay algo pendiente).
+    void maybeExtractMemory(true);
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
@@ -774,7 +1125,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     statusRef.current = "idle";
     setLatencyMs(null);
     if (wasActive) logRef.current.addSystem("Sesión finalizada.");
-  }, [cleanupPeer]);
+  }, [cleanupPeer, maybeExtractMemory]);
 
   const restart = useCallback(async () => {
     disconnect();
@@ -786,19 +1137,18 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     setMuted((current) => {
       const next = !current;
       mutedRef.current = next;
-      micStreamRef.current?.getAudioTracks().forEach((track) => {
-        track.enabled = !next;
-      });
+      updateSendEnabled();
+      applyReadyStatus();
       return next;
     });
-  }, []);
+  }, [applyReadyStatus, updateSendEnabled]);
 
   const stopSpeaking = useCallback(() => {
     cancelActiveResponse();
     if (statusRef.current === "speaking" || statusRef.current === "thinking") {
-      setStatusSafe("listening");
+      setStatusSafe(deriveReadyStatus());
     }
-  }, [cancelActiveResponse, setStatusSafe]);
+  }, [cancelActiveResponse, deriveReadyStatus, setStatusSafe]);
 
   const sendText = useCallback(
     (text: string): boolean => {
@@ -815,9 +1165,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       });
       if (!created) return false;
       sendEvent({ type: "response.create" });
+      recordExchange("user", trimmed);
+      void maybeInjectMemories(trimmed);
       return true;
     },
-    [cancelActiveResponse, sendEvent],
+    [cancelActiveResponse, maybeInjectMemories, recordExchange, sendEvent],
   );
 
   const resumeAudio = useCallback(() => {
@@ -834,6 +1186,54 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
+
+  const setListenMode = useCallback(
+    (mode: ListenMode) => {
+      listenModeRef.current = mode;
+      setListenModeState(mode);
+      if (mode === "auto") {
+        pttActiveRef.current = false;
+        setPttActiveState(false);
+      }
+      updateSendEnabled();
+      applyReadyStatus();
+      if (CONNECTED_STATUSES.has(statusRef.current)) {
+        logRef.current.addSystem(
+          mode === "ptt"
+            ? "Modo pulsar para hablar: mantén pulsado el botón del micrófono para hablar."
+            : "Modo de escucha automática activado.",
+        );
+      }
+    },
+    [applyReadyStatus, updateSendEnabled],
+  );
+
+  const setPttActive = useCallback(
+    (active: boolean) => {
+      if (listenModeRef.current !== "ptt") return;
+      pttActiveRef.current = active;
+      setPttActiveState(active);
+      updateSendEnabled();
+      applyReadyStatus();
+    },
+    [applyReadyStatus, updateSendEnabled],
+  );
+
+  const calibrateAmbient = useCallback(() => {
+    gateHook.calibrate();
+    gateStateRef.current = "calibrating";
+    applyReadyStatus();
+  }, [applyReadyStatus, gateHook]);
+
+  const extractMemoryNow = useCallback(async () => {
+    await maybeExtractMemory(true);
+  }, [maybeExtractMemory]);
+
+  /** Interruptor local de memoria (el maestro es MEMORY_ENABLED en servidor). */
+  const setMemoryActive = useCallback((active: boolean) => {
+    memoryActiveRef.current = active;
+    setMemoryActiveState(active);
+  }, []);
 
   // Red: reflejar caídas y reconectar al volver la conexión.
   useEffect(() => {
@@ -868,6 +1268,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
       dcRef.current?.close();
       pcRef.current?.close();
+      sendTrackRef.current?.stop();
       micStreamRef.current?.getTracks().forEach((track) => track.stop());
       if (audioRef.current) {
         audioRef.current.pause();
@@ -877,7 +1278,18 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     };
   }, []);
 
-  const isConnected = status === "listening" || status === "thinking" || status === "speaking";
+  const isConnected = CONNECTED_STATUSES.has(status);
+
+  const gate: GateDiagnostics = useMemo(
+    () => ({
+      state: gateHook.gateState,
+      noiseFloor: gateHook.noiseFloor,
+      threshold: gateHook.threshold,
+      blockedNoises: gateHook.blockedNoises,
+      level: gateHook.level,
+    }),
+    [gateHook.gateState, gateHook.noiseFloor, gateHook.threshold, gateHook.blockedNoises, gateHook.level],
+  );
 
   return useMemo(
     () => ({
@@ -892,6 +1304,14 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       agentStream,
       connectionState,
       dataChannelState,
+      micSettings,
+      listenMode,
+      pttActive,
+      gate,
+      memoryEnabled,
+      memoryActive,
+      lastRecall,
+      memorySavedCount,
       connect,
       disconnect,
       restart,
@@ -900,6 +1320,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       sendText,
       resumeAudio,
       clearError,
+      setListenMode,
+      setPttActive,
+      calibrateAmbient,
+      extractMemoryNow,
+      setMemoryActive,
     }),
     [
       status,
@@ -913,6 +1338,14 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       agentStream,
       connectionState,
       dataChannelState,
+      micSettings,
+      listenMode,
+      pttActive,
+      gate,
+      memoryEnabled,
+      memoryActive,
+      lastRecall,
+      memorySavedCount,
       connect,
       disconnect,
       restart,
@@ -921,6 +1354,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       sendText,
       resumeAudio,
       clearError,
+      setListenMode,
+      setPttActive,
+      calibrateAmbient,
+      extractMemoryNow,
+      setMemoryActive,
     ],
   );
 }

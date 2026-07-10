@@ -18,6 +18,9 @@ const PALETTES: Record<string, Palette> = {
   idle: { core: "#3a4a63", glow: "rgba(90,120,170,0.25)", ring: "rgba(120,150,200,0.35)" },
   requesting_mic: { core: "#4a5d7d", glow: "rgba(90,140,200,0.3)", ring: "rgba(120,170,230,0.45)" },
   connecting: { core: "#4a5d7d", glow: "rgba(90,140,200,0.3)", ring: "rgba(120,170,230,0.45)" },
+  calibrating: { core: "#8fa06a", glow: "rgba(190,210,130,0.3)", ring: "rgba(200,220,150,0.5)" },
+  standby: { core: "#42566f", glow: "rgba(100,140,190,0.22)", ring: "rgba(130,165,215,0.4)" },
+  voice_detected: { core: "#2f9cba", glow: "rgba(70,190,225,0.32)", ring: "rgba(90,205,240,0.55)" },
   listening: { core: "#39c8e8", glow: "rgba(70,205,235,0.45)", ring: "rgba(90,215,255,0.7)" },
   thinking: { core: "#e8b45a", glow: "rgba(255,196,107,0.4)", ring: "rgba(255,196,107,0.65)" },
   speaking: { core: "#8b7cf7", glow: "rgba(139,124,247,0.5)", ring: "rgba(160,145,255,0.75)" },
@@ -75,11 +78,16 @@ export default function MicLevelVisualizer({
 
       // Nivel objetivo según estado. Al hablar, si no hay analizador del
       // stream del agente (p. ej. TTS en Safari), late con un pulso base.
+      // En espera (standby) el orbe respira suave y NO sigue al micrófono:
+      // el ruido ambiente no debe hacer parecer que el robot escucha.
       let target = 0;
       if (current === "listening") target = micLevelRef.current ?? 0;
+      else if (current === "voice_detected") target = (micLevelRef.current ?? 0) * 0.6;
       else if (current === "speaking")
         target = Math.max(agentLevelRef.current ?? 0, 0.16 + 0.12 * Math.sin(t * 3.4));
       else if (current === "thinking") target = 0.25 + 0.2 * Math.sin(t * 3.1);
+      else if (current === "standby") target = 0.05 + 0.04 * Math.sin(t * 1.3);
+      else if (current === "calibrating") target = 0.12 + 0.08 * Math.sin(t * 4.2);
       else if (current === "connecting" || current === "requesting_mic" || current === "reconnecting")
         target = 0.15 + 0.12 * Math.sin(t * 2.2);
       smoothLevel += (target - smoothLevel) * 0.18;

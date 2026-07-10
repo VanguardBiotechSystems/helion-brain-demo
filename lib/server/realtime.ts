@@ -1,5 +1,6 @@
 import type { ErrorCode } from "@/lib/shared/errors";
 import { REALTIME_ROBOT_TOOLS } from "@/lib/robot/tools";
+import { REALTIME_MEMORY_TOOLS } from "./memory/tools";
 import type { AppEnv } from "./env";
 import { buildAgentInstructions } from "./personality";
 import { logError, logInfo } from "./log";
@@ -29,20 +30,33 @@ export interface RealtimeSessionFailure {
 
 export type RealtimeSessionResult = RealtimeSessionSuccess | RealtimeSessionFailure;
 
-export function buildRealtimeSessionConfig(env: AppEnv): Record<string, unknown> {
+export interface SessionConfigExtras {
+  /** Bloque de recuerdos previos para las instrucciones (puede ser ""). */
+  memoryContext?: string;
+}
+
+export function buildRealtimeSessionConfig(
+  env: AppEnv,
+  extras: SessionConfigExtras = {},
+): Record<string, unknown> {
+  const audioCfg = env.audio;
+
+  // La detección de turnos se parametriza por perfil de audio (ver
+  // docs/AUDIO_GATE.md): server_vad conservador por defecto para no
+  // dispararse con ruido; semantic_vad disponible por configuración.
   const turnDetection =
-    env.turnDetection === "server_vad"
+    audioCfg.turnDetection === "server_vad"
       ? {
           type: "server_vad",
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 500,
+          threshold: audioCfg.vadThreshold,
+          prefix_padding_ms: audioCfg.vadPrefixPaddingMs,
+          silence_duration_ms: audioCfg.vadSilenceMs,
           create_response: true,
           interrupt_response: true,
         }
       : {
           type: "semantic_vad",
-          eagerness: "auto",
+          eagerness: audioCfg.vadEagerness,
           create_response: true,
           interrupt_response: true,
         };
@@ -55,23 +69,33 @@ export function buildRealtimeSessionConfig(env: AppEnv): Record<string, unknown>
   // Con motor de voz externo (ElevenLabs), el modelo responde solo texto:
   // los oídos (VAD + transcripción) siguen siendo los de la sesión realtime,
   // y la voz la sintetiza el servidor con el TtsProvider configurado.
-  const audio: Record<string, unknown> = {
-    input: {
-      transcription,
-      turn_detection: turnDetection,
-    },
+  const input: Record<string, unknown> = {
+    transcription,
+    turn_detection: turnDetection,
   };
+  if (audioCfg.noiseReduction !== "off") {
+    input.noise_reduction = { type: audioCfg.noiseReduction };
+  }
+
+  const audio: Record<string, unknown> = { input };
   if (env.voiceEngine === "openai_realtime") {
     audio.output = { voice: env.realtimeVoice };
   }
 
+  const tools = env.memory.enabled
+    ? [...REALTIME_ROBOT_TOOLS, ...REALTIME_MEMORY_TOOLS]
+    : REALTIME_ROBOT_TOOLS;
+
   const config: Record<string, unknown> = {
     type: "realtime",
     model: env.realtimeModel,
-    instructions: buildAgentInstructions(env.agentName, env.voiceEngine),
+    instructions: buildAgentInstructions(env.agentName, env.voiceEngine, {
+      memoryEnabled: env.memory.enabled,
+      memoryContext: extras.memoryContext,
+    }),
     output_modalities: env.voiceEngine === "elevenlabs" ? ["text"] : ["audio"],
     audio,
-    tools: REALTIME_ROBOT_TOOLS,
+    tools,
     tool_choice: "auto",
   };
 
@@ -84,7 +108,10 @@ export function buildRealtimeSessionConfig(env: AppEnv): Record<string, unknown>
   return config;
 }
 
-export async function createRealtimeClientSecret(env: AppEnv): Promise<RealtimeSessionResult> {
+export async function createRealtimeClientSecret(
+  env: AppEnv,
+  extras: SessionConfigExtras = {},
+): Promise<RealtimeSessionResult> {
   let response: Response;
   try {
     response = await fetch(`${env.openaiBaseUrl}/v1/realtime/client_secrets`, {
@@ -95,7 +122,7 @@ export async function createRealtimeClientSecret(env: AppEnv): Promise<RealtimeS
       },
       body: JSON.stringify({
         expires_after: { anchor: "created_at", seconds: CLIENT_SECRET_TTL_SECONDS },
-        session: buildRealtimeSessionConfig(env),
+        session: buildRealtimeSessionConfig(env, extras),
       }),
       cache: "no-store",
     });

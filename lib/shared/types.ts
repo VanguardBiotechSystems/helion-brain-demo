@@ -1,14 +1,59 @@
 /** Tipos compartidos entre cliente y servidor. */
 
+/**
+ * Estados del agente. Semántica de escucha (importante):
+ * - standby: micrófono conectado pero SIN voz detectada (no se envía audio).
+ * - calibrating: midiendo el ruido ambiente de la sala.
+ * - voice_detected: energía sostenida, confirmando que es voz humana.
+ * - listening: voz confirmada, el audio fluye hacia el modelo.
+ */
 export type AgentStatus =
   | "idle"
   | "requesting_mic"
   | "connecting"
+  | "calibrating"
+  | "standby"
+  | "voice_detected"
   | "listening"
   | "thinking"
   | "speaking"
   | "reconnecting"
   | "error";
+
+export type ListenMode = "auto" | "ptt";
+
+/** Configuración del gate local que el servidor entrega al cliente. */
+export interface ClientGateConfig {
+  enabled: boolean;
+  calibrationMs: number;
+  minSpeechMs: number;
+  spikeRejectionMs: number;
+  thresholdMultiplier: number;
+  autoGainControl: boolean;
+}
+
+/** Constraints de micrófono: pedidas vs aplicadas (para diagnóstico). */
+export interface MicSettingsInfo {
+  deviceLabel: string;
+  requested: { echoCancellation: boolean; noiseSuppression: boolean; autoGainControl: boolean };
+  applied: {
+    echoCancellation: boolean | null;
+    noiseSuppression: boolean | null;
+    autoGainControl: boolean | null;
+    sampleRate: number | null;
+  };
+}
+
+/** Resumen de recuerdo para UI y herramientas (sin embedding). */
+export interface MemorySummary {
+  id: string;
+  type: string;
+  title: string;
+  content: string;
+  importance: number;
+  updatedAt: string;
+  score?: number;
+}
 
 export type TranscriptRole = "user" | "agent" | "system" | "action";
 
@@ -46,4 +91,6 @@ export interface SessionResponse {
   agentName: string;
   baseUrl: string;
   voiceEngine: VoiceEngine;
+  audioGate?: ClientGateConfig;
+  memory?: { enabled: boolean; autoSave: boolean };
 }

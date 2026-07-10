@@ -135,6 +135,29 @@ export function CloseIcon({ size, className }: IconProps) {
   );
 }
 
+export function BrainIcon({ size, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M12 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3" />
+      <path d="M12 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3" />
+      <path d="M9 8H7.5A2.5 2.5 0 0 0 5 10.5v0A2.5 2.5 0 0 0 7.5 13H9" />
+      <path d="M15 8h1.5A2.5 2.5 0 0 1 19 10.5v0a2.5 2.5 0 0 1-2.5 2.5H15" />
+      <path d="M12 8h0" />
+    </svg>
+  );
+}
+
+export function HandIcon({ size, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M8 12V6.5a1.5 1.5 0 0 1 3 0V11" />
+      <path d="M11 11V5a1.5 1.5 0 0 1 3 0v6" />
+      <path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V13" />
+      <path d="M8 12l-1.8-1.8a1.4 1.4 0 0 0-2 2L8 16.5A5.5 5.5 0 0 0 12.5 21h.5a5 5 0 0 0 4-2l0 0" />
+    </svg>
+  );
+}
+
 export function AlertIcon({ size, className }: IconProps) {
   return (
     <svg {...base(size)} className={className}>

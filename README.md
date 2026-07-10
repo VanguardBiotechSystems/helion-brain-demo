@@ -6,8 +6,10 @@ Helion es una aplicación web que da voz, oído y razonamiento a un robot humano
 
 ## Características
 
-- **Voz en tiempo real (ruta principal):** OpenAI Realtime API por WebRTC directamente desde el navegador. Detección de turnos semántica, *barge-in* (puedes interrumpir al agente mientras habla), latencia baja.
-- **Dos motores de voz:** `openai_realtime` (speech-to-speech, latencia mínima) o `elevenlabs` (voz española nativa real sintetizada en servidor, algo más de latencia). Ver [Voz en español de España](#voz-en-español-de-españa).
+- **Voz en tiempo real (ruta principal):** OpenAI Realtime API por WebRTC directamente desde el navegador. *Barge-in* (puedes interrumpir al agente mientras habla), latencia baja.
+- **Escucha disciplinada:** gate de audio local con calibración de ruido ambiente, umbral dinámico y rechazo de picos — teclear, golpear la mesa o mover el portátil **no** activa al robot. «Escuchando» significa "voz humana detectada", no "micro abierto". Modo **pulsar para hablar** como plan B. Ver [docs/AUDIO_GATE.md](docs/AUDIO_GATE.md).
+- **Memoria persistente por capas:** episódica, semántica, preferencias, personas, proyecto, procedimientos y seguridad; con curador automático, búsqueda por embeddings, deduplicación, auditoría y borrado. Panel «Memoria» en la UI y control por voz ("recuerda que…", "¿qué recuerdas de…?", "olvida…"). Ver [docs/MEMORY_ARCHITECTURE.md](docs/MEMORY_ARCHITECTURE.md).
+- **Dos motores de voz:** `openai_realtime` (speech-to-speech, latencia mínima, por defecto) o `elevenlabs` (voz española nativa sintetizada en servidor). Ver [Voz en español de España](#voz-en-español-de-españa).
 - **Seguridad de claves:** la API key de OpenAI vive solo en el servidor. El navegador recibe únicamente un token efímero que caduca en minutos.
 - **Acceso protegido:** passcode + cookie firmada (HMAC-SHA256, httpOnly). Rate limiting por IP en login, creación de sesiones y chat.
 - **UI de producto:** orbe de estado animado (escuchando / pensando / hablando / reconectando / error), subtítulos en vivo, latencia aproximada, controles para mutear, cortar la voz, reiniciar sesión y borrar conversación.
@@ -51,6 +53,14 @@ Copia `.env.example` a `.env.local` y rellena los valores. Resumen:
 | `ELEVENLABS_VOICE_ID` | si `elevenlabs` | — | ID de la voz española elegida. |
 | `ELEVENLABS_MODEL` | — | `eleven_flash_v2_5` | Modelo TTS de baja latencia. |
 | `ELEVENLABS_OUTPUT_FORMAT` | — | `mp3_44100_128` | Formato del audio generado. |
+| `AUDIO_PROFILE` | — | `laptop_demo` | Perfil de escucha: `laptop_demo`, `near_field`, `far_field`, `robot_room`. |
+| `OPENAI_VAD_*` / `OPENAI_NOISE_REDUCTION` | — | según perfil | Overrides finos del VAD (ver [docs/AUDIO_GATE.md](docs/AUDIO_GATE.md)). |
+| `LOCAL_AUDIO_GATE_ENABLED` | — | `true` | Gate local anti-ruido (calibración + umbral dinámico). |
+| `LOCAL_AUDIO_*` | — | ver `.env.example` | Calibración, duración mínima de voz, rechazo de picos, multiplicador, AGC. |
+| `MEMORY_ENABLED` | — | `true` | Memoria persistente del agente. |
+| `MEMORY_PROVIDER` | — | `local` | `local` (archivo JSON) o `postgres` (producción). |
+| `DATABASE_URL` | si `postgres` | — | Connection string Postgres (Supabase/Neon, con `sslmode=require`). |
+| `MEMORY_*` | — | ver `.env.example` | Modelos de extracción/embeddings, topK, umbral de importancia, retención… |
 | `OPENAI_TRANSCRIPTION_MODEL` | — | `gpt-4o-mini-transcribe` | Transcripción para subtítulos. |
 | `OPENAI_TRANSCRIPTION_LANGUAGE` | — | `es` | Idioma esperado (`auto` para autodetección). |
 | `OPENAI_TURN_DETECTION` | — | `semantic_vad` | `semantic_vad` o `server_vad`. |
@@ -108,13 +118,16 @@ En cualquier plataforma: **nunca** subas `.env.local`; usa siempre el gestor de 
 1. Abre la URL pública en **Chrome, Edge o Safari recientes** (escritorio recomendado).
 2. Introduce el passcode.
 3. Pulsa **«Conectar cerebro»** y acepta el permiso de micrófono.
-4. Cuando el estado sea **«Escuchando»**, habla con naturalidad. Prueba:
+4. Tras «Calibrando ambiente…» el estado queda **«En espera»**: habla con naturalidad y pasará a «Voz detectada…» → «Escuchando». Prueba:
    - “Hola, ¿quién eres?”
    - “¿Qué puedes hacer y qué no puedes hacer todavía?”
    - Interrúmpelo a mitad de respuesta (debería callarse y escucharte).
    - “Saluda con la mano” → verás una tarjeta de **acción simulada** `WAVE_HAND`.
    - “Muévete hasta la cocina” → responderá con honestidad que no tiene cuerpo conectado.
-5. Usa el botón de subtítulos para mostrar/ocultar la transcripción y el panel 🔧 para el diagnóstico.
+   - “Recuerda que la demo es mañana a las once” → lo guardará en memoria y lo confirmará.
+   - “¿Qué recuerdas del proyecto?” → responderá con sus recuerdos reales.
+   - Teclea en el portátil mientras está «En espera» → **no** debe reaccionar (contador de ruidos bloqueados en diagnóstico).
+5. Botón de subtítulos para la transcripción, 🧠 para la memoria y 🔧 para el diagnóstico (incluye «Calibrar ambiente»). Checklist completa de pruebas de audio en [docs/AUDIO_GATE.md](docs/AUDIO_GATE.md).
 
 ### Checklist antes de enseñarla
 
@@ -200,6 +213,11 @@ En este modo, los **oídos y el cerebro siguen siendo OpenAI Realtime** (misma d
 
 El audio realtime se factura por tokens de audio de entrada/salida y es sensiblemente más caro que el texto. Recomendaciones: cierra las sesiones al terminar (botón **Finalizar**), configura límites de gasto y alertas en el panel de OpenAI, vigila el *usage dashboard* tras cada demo, y usa `gpt-realtime-2.1-mini` si el coste importa más que la calidad máxima. Los precios cambian: consulta la página oficial de precios de OpenAI en lugar de cifras escritas aquí.
 
+## Escucha y memoria (resumen)
+
+- **Audio**: tres capas — constraints de captura (AGC off), gate local con calibración/umbral dinámico/rechazo de picos (`lib/audio/gateEngine.ts`), y VAD + `noise_reduction` de OpenAI parametrizados por `AUDIO_PROFILE`. Modo «pulsar para hablar» en la barra de controles. Detalles, racional y checklist de pruebas manuales: [docs/AUDIO_GATE.md](docs/AUDIO_GATE.md).
+- **Memoria**: tipos (episódica/semántica/preferencias/personas/proyecto/procedimientos/seguridad), Memory Curator con esquema JSON estricto, embeddings, dedup, consolidación, auditoría y seeds del proyecto. Para borrar recuerdos: panel 🧠 (borrar/archivar por recuerdo) o por voz ("olvida lo que te dije sobre…"). Producción con Supabase/Neon: crea la base, pon `DATABASE_URL` y `MEMORY_PROVIDER=postgres` — las tablas se crean solas. Detalles: [docs/MEMORY_ARCHITECTURE.md](docs/MEMORY_ARCHITECTURE.md).
+
 ## Limitaciones conocidas
 
 - El contexto conversacional vive en la sesión realtime: si la conexión se recrea (reconexión), el agente pierde la memoria de lo hablado (los subtítulos locales se conservan). Las sesiones realtime tienen además un máximo de ~60 minutos.
@@ -208,6 +226,9 @@ El audio realtime se factura por tokens de audio de entrada/salida y es sensible
 - Sin persistencia: no hay historial entre visitas (decisión deliberada de privacidad para la demo).
 - El modo texto fallback no reproduce voz (responde por escrito) cuando no hay sesión de voz activa; con sesión activa, lo escrito sí se responde con voz.
 - En modo `elevenlabs` la voz tarda un poco más (se sintetiza al completarse la respuesta) y el consumo de caracteres cuenta contra la cuota de ElevenLabs.
+- El gate local recorta ~300 ms del arranque de cada frase (confirmación de voz); es deliberado y configurable.
+- Con `MEMORY_PROVIDER=local` en serverless (Vercel), los recuerdos no sobreviven a los redespliegues: usa Postgres en producción.
+- La recuperación de memoria por turno alimenta a las respuestas siguientes (la respuesta en curso usa el contexto de inicio de sesión y las herramientas).
 
 ## Qué falta para conectarlo al robot físico
 

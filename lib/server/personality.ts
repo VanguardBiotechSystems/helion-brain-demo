@@ -41,6 +41,17 @@ function baseIdentity(agentName: string): string {
 
 export type PersonalityVoiceEngine = "openai_realtime" | "elevenlabs";
 
+const MEMORY_RULES = `
+
+# Memoria persistente
+- Tienes memoria a largo plazo entre conversaciones. Úsala con elegancia y naturalidad ("como habíamos decidido…", "la última vez me contaste…"), sin recitar que es una memoria, sin numerarla y sin anunciar cada guardado.
+- Si el usuario pide recordar algo ("recuerda que…", "no olvides…"), usa la herramienta memory_save y confírmalo en UNA frase breve.
+- Si pregunta qué recuerdas ("¿qué sabes de mí?", "¿qué recuerdas del proyecto?"), usa memory_recall y responde de forma natural con lo encontrado.
+- Si pide olvidar algo ("olvida lo que te dije sobre…", "borra tu memoria de…"), confirma qué quiere olvidar y usa memory_forget.
+- PROHIBIDO guardar claves, contraseñas, passcodes, tokens o credenciales. Si el usuario te dicta una, dile con calma que por seguridad no la guardarás, y no la repitas en voz alta.
+- Información delicada (salud, datos personales sensibles): solo se guarda si el usuario lo pide explícitamente y lo confirma.
+- No finjas recordar lo que no está en tu memoria. Si no encuentras un recuerdo, dilo con honestidad. Si un recuerdo es incierto, exprésalo con reserva.`;
+
 const TTS_OUTPUT_RULES = `
 
 # Salida por voz externa (modo TTS)
@@ -49,16 +60,31 @@ const TTS_OUTPUT_RULES = `
 - Escribe los números, horas y siglas tal y como se pronuncian cuando pueda haber ambigüedad (p. ej. "las tres y media", "uve pe ene").
 - Brevedad estricta: como norma, cuatro o cinco frases como máximo por respuesta. Si el tema da para más, resume y ofrece continuar ("¿quieres que siga?").`;
 
+export interface PersonalityOptions {
+  memoryEnabled?: boolean;
+  /** Bloque de recuerdos previos, ya curado y acotado (puede ser vacío). */
+  memoryContext?: string;
+}
+
 export function buildAgentInstructions(
   agentName: string,
   voiceEngine: PersonalityVoiceEngine = "openai_realtime",
+  options: PersonalityOptions = {},
 ): string {
+  const memoryBlock = options.memoryEnabled
+    ? `${MEMORY_RULES}${
+        options.memoryContext
+          ? `\n\n# Recuerdos previos relevantes\n${options.memoryContext}\n(Provienen de conversaciones anteriores; úsalos con criterio y sin citarlos literalmente.)`
+          : ""
+      }`
+    : "";
+
   return `${baseIdentity(agentName)}
 
 # Herramienta de gestos simulados
 - Dispones de la herramienta robot_gesture para registrar la INTENCIÓN de un gesto sencillo (saludar con la mano, mover la cabeza, cambiar la expresión facial, parada total).
 - Úsala cuando el usuario pida un gesto físico simple. La acción solo queda registrada y visible en pantalla como simulación: no mueve nada real, y así debes explicarlo en una frase breve.
-- Para acciones físicas complejas o peligrosas, no uses la herramienta: explica con honestidad que aún no es posible.${voiceEngine === "elevenlabs" ? TTS_OUTPUT_RULES : ""}`;
+- Para acciones físicas complejas o peligrosas, no uses la herramienta: explica con honestidad que aún no es posible.${voiceEngine === "elevenlabs" ? TTS_OUTPUT_RULES : ""}${memoryBlock}`;
 }
 
 export function buildTextFallbackInstructions(agentName: string): string {
