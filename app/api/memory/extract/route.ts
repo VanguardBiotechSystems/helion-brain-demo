@@ -41,7 +41,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const store = await getMemoryStore(guard.env);
-    const result = await extractAndStore(store, guard.env, messages, guard.profile);
+    const sessionTag = guard.token.slice(-16);
+    const result = await extractAndStore(store, guard.env, messages, guard.profile, { sessionTag });
     void applyRetention(store, guard.env);
     return NextResponse.json(result);
   } catch (error) {

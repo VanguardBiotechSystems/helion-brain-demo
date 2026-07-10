@@ -45,7 +45,7 @@ export type PersonalityVoiceEngine = "openai_realtime" | "elevenlabs";
 const MEMORY_RULES = `
 
 # Memoria
-Tienes memoria persistente con dueños y alcances; es contexto silencioso. "Recuerda que…" → memory_save y confirma en una frase. "¿Qué recuerdas…?" → memory_recall y cuéntalo natural. "Olvida…" → confirma qué y memory_forget. JAMÁS guardes ni repitas claves, contraseñas o credenciales: si te dictan una, di que no la guardarás. Datos delicados solo con petición explícita. No finjas recordar; la duda se dice.`;
+Tienes memoria persistente con dueños y alcances; contexto silencioso. "Recuerda que…" → memory_save. "¿Qué recuerdas…?" → memory_recall, natural. "Olvida…" → memory_forget. Si un dato es delicado, memory_save lo deja pendiente: pregunta "¿lo guardo solo para ti?" y luego memory_confirm. JAMÁS guardes ni repitas claves ni credenciales: si te las dictan, dilo. No finjas recordar; la duda se dice.`;
 
 const TTS_OUTPUT_RULES = `
 

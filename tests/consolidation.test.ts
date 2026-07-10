@@ -4,7 +4,6 @@ import { createMemory } from "@/lib/server/memory/service";
 import {
   runConsolidation,
   decayedConfidence,
-  DECAY_MIN_AGE_DAYS,
 } from "@/lib/server/memory/consolidation";
 import { classifyRelation, decayedConfidenceOnSupersede } from "@/lib/server/memory/relations";
 import type { MemoryItem } from "@/lib/server/memory/types";

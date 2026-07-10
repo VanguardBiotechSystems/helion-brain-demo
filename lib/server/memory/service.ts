@@ -13,6 +13,7 @@ import {
 import { rankMemories } from "./scoring";
 import { classifyRelation, decayedConfidenceOnSupersede } from "./relations";
 import { buildSecureMemoryContext } from "./retrieval";
+import { createPendingMemory } from "./pending";
 import { SEED_MEMORIES } from "./seeds";
 import {
   makeMemoryId,
@@ -316,7 +317,7 @@ export async function buildSessionMemoryContext(
 export interface ExtractionResult {
   saved: Array<{ id: string; title: string; type: MemoryType }>;
   skipped: number;
-  pendingConfirmation: Array<{ title: string; reason: string }>;
+  pendingConfirmation: Array<{ title: string; reason: string; confirmationId?: string }>;
 }
 
 /** Flujo del Memory Curator: extraer → validar → filtrar → deduplicar → guardar. */
@@ -325,6 +326,7 @@ export async function extractAndStore(
   env: AppEnv,
   messages: CuratorInputMessage[],
   profile?: AccessProfile,
+  options: { sessionTag?: string } = {},
 ): Promise<ExtractionResult> {
   const result: ExtractionResult = { saved: [], skipped: 0, pendingConfirmation: [] };
   if (messages.length === 0) return result;
@@ -341,7 +343,38 @@ export async function extractAndStore(
       env.memory.requireConfirmationForSensitive &&
       (candidate.sensitivity === "sensitive" || candidate.requiresUserConfirmation)
     ) {
-      result.pendingConfirmation.push({ title: candidate.title, reason: candidate.reason });
+      // Contenido sensible: no se descarta en silencio — queda PENDIENTE de
+      // confirmación del propietario. Sin identidad conocida no hay dueño al
+      // que atribuirlo: se omite (se volverá a proponer al confirmarse).
+      if (profile && profile.id !== "guest") {
+        const pending = await createPendingMemory(
+          store,
+          {
+            scope: "private",
+            ownerProfileId: profile.id,
+            createdByProfileId: profile.id,
+            type: candidate.memoryType,
+            assertionType: candidate.assertionType,
+            title: candidate.title,
+            content: candidate.canonicalContent,
+            canonicalContent: candidate.canonicalContent,
+            importance: candidate.importance,
+            confidence: candidate.confidence,
+            source: "conversation",
+            sensitivity: candidate.sensitivity === "sensitive" ? "sensitive" : "private",
+            tags: candidate.tags,
+            provenance: { curatorReason: candidate.reason },
+          },
+          { embed, sessionTag: options.sessionTag ?? "", reason: `sensible: ${candidate.reason.slice(0, 80)}` },
+        );
+        result.pendingConfirmation.push({
+          title: candidate.title,
+          reason: candidate.reason,
+          confirmationId: pending?.confirmationId,
+        });
+      } else {
+        result.pendingConfirmation.push({ title: candidate.title, reason: candidate.reason });
+      }
       continue;
     }
     // Alcance: las pistas explícitas del usuario ganan al curador; sin

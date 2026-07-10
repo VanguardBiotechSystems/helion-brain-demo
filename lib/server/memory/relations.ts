@@ -50,13 +50,11 @@ function similarity(
 }
 
 /**
- * Clasifica la relación entre un candidato y una memoria previa. Puro y
- * testeable. `now` inyectable para tests deterministas.
+ * Clasifica la relación entre un candidato y una memoria previa. Puro y testeable.
  */
 export function classifyRelation(
   previous: MemoryItem,
-  candidate: { embedding: number[] | null; text: string; assertionType?: MemoryItem["assertionType"]; createdAt?: number },
-  now: number = Date.now(),
+  candidate: { embedding: number[] | null; text: string; assertionType?: MemoryItem["assertionType"] },
 ): RelationVerdict {
   const { value: sim, method, low, high } = similarity(previous, candidate);
 

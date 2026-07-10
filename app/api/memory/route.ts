@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { memoryDisabledResponse, requireAccess } from "@/lib/server/apiGuard";
 import { logError } from "@/lib/server/log";
 import { createMemory, filterMemoriesForProfile, getMemoryStore, makeEmbedder } from "@/lib/server/memory/service";
+import { createPendingMemory } from "@/lib/server/memory/pending";
 import { detectScopeCues } from "@/lib/server/memory/permissions";
 import { ASSERTION_TYPES, type MemoryAssertionType, type MemoryListFilter, type MemorySensitivity, type MemoryType } from "@/lib/server/memory/types";
 
@@ -89,6 +90,39 @@ export async function POST(request: NextRequest) {
     if ((scope === "project" || scope === "project_demo") && !guard.profile.canCreateProjectMemory) {
       scope = "private";
     }
+
+    // Contenido sensible con identidad conocida: no se guarda directo, queda
+    // PENDIENTE y devuelve un confirmationId para que Helion pida el "sí".
+    if (
+      sensitivity === "sensitive" &&
+      guard.env.memory.requireConfirmationForSensitive &&
+      guard.identityStatus !== "unknown" &&
+      guard.profile.id !== "guest"
+    ) {
+      const pending = await createPendingMemory(
+        store,
+        {
+          scope: "private",
+          ownerProfileId: guard.profile.id,
+          createdByProfileId: guard.profile.id,
+          type,
+          assertionType,
+          title: content.slice(0, 80),
+          content,
+          canonicalContent: content,
+          importance: typeof body?.importance === "number" ? Math.min(1, Math.max(0, body.importance)) : 0.8,
+          confidence: 0.95,
+          source: "explicit_user_request",
+          sensitivity: "sensitive",
+        },
+        { embed: makeEmbedder(guard.env), sessionTag: guard.token.slice(-16), reason: "guardado sensible explícito" },
+      );
+      if (!pending) {
+        return NextResponse.json({ error: { code: "unknown", message: "Recuerdo rechazado." } }, { status: 400 });
+      }
+      return NextResponse.json({ pending: true, confirmationId: pending.confirmationId, title: pending.title });
+    }
+
     const result = await createMemory(
       store,
       {

@@ -793,10 +793,23 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           const body = (await response.json().catch(() => null)) as {
             item?: { title?: string };
             deduplicatedInto?: string | null;
+            pending?: boolean;
+            confirmationId?: string;
+            title?: string;
             error?: { message?: string };
           } | null;
           if (!response.ok) {
             return { saved: false, reason: body?.error?.message ?? "No se pudo guardar." };
+          }
+          // Sensible: quedó pendiente. Pide confirmación y usa memory_confirm
+          // con este confirmationId cuando la persona responda.
+          if (body?.pending) {
+            return {
+              saved: false,
+              pending: true,
+              confirmationId: body.confirmationId,
+              note: "Es un dato delicado: pregunta si quiere que lo guardes solo para él antes de confirmar.",
+            };
           }
           setMemorySavedCount((count) => count + 1);
           firePulse("memory");
@@ -836,6 +849,23 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           } | null;
           if (!response.ok) return { archived: [], note: "Memoria no disponible ahora mismo." };
           return { archived: (body?.archived ?? []).map((memory) => memory.title) };
+        }
+        if (name === MEMORY_TOOL_NAMES.confirm) {
+          const response = await fetch("/api/memory/confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirmationId: args.confirmationId, decision: args.decision }),
+          });
+          const body = (await response.json().catch(() => null)) as {
+            ok?: boolean;
+            decision?: string;
+            reason?: string;
+          } | null;
+          if (!response.ok || !body?.ok) {
+            return { confirmed: false, reason: body?.reason ?? "No se pudo resolver el recuerdo pendiente." };
+          }
+          if (body.decision === "confirm") firePulse("memory");
+          return { confirmed: body.decision === "confirm", discarded: body.decision === "discard" };
         }
       } catch {
         return { error: "La memoria no está disponible ahora mismo." };
@@ -882,7 +912,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       } else if (
         name === MEMORY_TOOL_NAMES.save ||
         name === MEMORY_TOOL_NAMES.recall ||
-        name === MEMORY_TOOL_NAMES.forget
+        name === MEMORY_TOOL_NAMES.forget ||
+        name === MEMORY_TOOL_NAMES.confirm
       ) {
         output = await handleMemoryTool(name, argsJson);
       } else if (name === ROBOT_GESTURE_TOOL_NAME) {

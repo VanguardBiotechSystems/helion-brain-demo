@@ -7,6 +7,7 @@ export const MEMORY_TOOL_NAMES = {
   save: "memory_save",
   recall: "memory_recall",
   forget: "memory_forget",
+  confirm: "memory_confirm",
 } as const;
 
 export const REALTIME_MEMORY_TOOLS = [
@@ -73,6 +74,23 @@ export const REALTIME_MEMORY_TOOLS = [
         query: { type: "string", description: "Tema o contenido a olvidar." },
       },
       required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function" as const,
+    name: MEMORY_TOOL_NAMES.confirm,
+    description:
+      "Resuelve un recuerdo que quedó pendiente de confirmación por ser delicado. Cuando propusiste guardar " +
+      "algo sensible ('¿quieres que lo guarde solo para ti?') y la persona responde, llama con el " +
+      "confirmationId que te devolvió el guardado y decision='confirm' si acepta o 'discard' si no.",
+    parameters: {
+      type: "object",
+      properties: {
+        confirmationId: { type: "string", description: "Identificador del recuerdo pendiente." },
+        decision: { type: "string", enum: ["confirm", "discard"], description: "Qué hacer con él." },
+      },
+      required: ["confirmationId", "decision"],
       additionalProperties: false,
     },
   },
