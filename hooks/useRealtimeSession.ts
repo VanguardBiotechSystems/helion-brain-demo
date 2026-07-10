@@ -563,7 +563,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
             content: [
               {
                 type: "input_text",
-                text: `Recuerdos recuperados de la memoria persistente (contexto, no los cites literalmente):\n${block}`,
+                text: `Contexto silencioso de memoria (úsalo solo si viene al caso; no lo menciones, no lo recites, no cambies de tema por él):\n${block}`,
               },
             ],
           },
