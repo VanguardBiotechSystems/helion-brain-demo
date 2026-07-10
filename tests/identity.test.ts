@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { matchProfileByPasscode, resolveProfiles, type AccessProfile } from "@/lib/server/profiles";
+import { matchGatePasscode, matchProfileByAlias, resolveProfiles, getProfileById, type AccessProfile } from "@/lib/server/profiles";
 import { canProfileAccessMemory, detectScopeCues, filterMemoriesForProfile } from "@/lib/server/memory/permissions";
 import { migrateLegacyScopes, type MemoryItem } from "@/lib/server/memory/types";
 import { containsSecret } from "@/lib/server/memory/redaction";
@@ -12,35 +12,44 @@ import { LocalMemoryStore } from "@/lib/server/memory/localStore";
 import { createMemory, buildSessionMemoryContext } from "@/lib/server/memory/service";
 import { readEnv } from "@/lib/server/env";
 
-const juanma: AccessProfile = { id: "juanma", displayName: "Juanma", role: "owner", passcode: "a", memoryScopes: ["project", "project_demo", "public", "system_self", "safety"], canManageMemory: true, canViewDebug: true, canCreateProjectMemory: true };
-const sergio: AccessProfile = { id: "sergio", displayName: "Sergio", role: "robot_creator", passcode: "b", memoryScopes: ["project", "project_demo", "public", "system_self", "safety"], canManageMemory: false, canViewDebug: false, canCreateProjectMemory: true };
-const visitante: AccessProfile = { id: "guest", displayName: "Visitante", role: "visitor", passcode: "c", memoryScopes: ["project_demo", "public", "system_self"], canManageMemory: false, canViewDebug: false, canCreateProjectMemory: false };
+const juanma: AccessProfile = { id: "juanma", displayName: "Juanma", role: "owner", aliases: ["juanma"], trustLevel: "owner", requiresPin: true, memoryScopes: ["project", "project_demo", "public", "system_self", "safety"], canManageMemory: true, canViewDebug: true, canCreateProjectMemory: true };
+const sergio: AccessProfile = { id: "sergio", displayName: "Sergio", role: "robot_creator", aliases: ["sergio"], trustLevel: "project_member", requiresPin: false, memoryScopes: ["project", "project_demo", "public", "system_self", "safety"], canManageMemory: false, canViewDebug: false, canCreateProjectMemory: true };
+const visitante: AccessProfile = { id: "guest", displayName: "Visitante", role: "visitor", aliases: ["visitante"], trustLevel: "visitor", requiresPin: false, memoryScopes: ["project_demo", "public", "system_self"], canManageMemory: false, canViewDebug: false, canCreateProjectMemory: false };
 
 function mem(scope: MemoryItem["scope"], owner: string | null = null): MemoryItem {
   const now = new Date().toISOString();
   return { id: `m${Math.random()}`, profileId: "default", scope, visibility: "shared", ownerProfileId: owner, createdByProfileId: owner, allowedProfileIds: [], type: "semantic", title: "t", content: "c", canonicalContent: "c", summary: "", embedding: null, importance: 0.8, confidence: 0.9, source: "conversation", sensitivity: "normal", status: "active", tags: [], relatedEntities: [], createdAt: now, updatedAt: now, lastAccessedAt: null, accessCount: 0, expiresAt: null, provenance: {}, version: 1 };
 }
 
-describe("perfiles de acceso", () => {
-  it("resuelve perfiles simples y legado", () => {
-    const { profiles } = resolveProfiles({ OWNER_PASSCODE: "p1", SERGIO_PASSCODE: "p2", APP_ACCESS_PASSWORD: "p3" });
-    expect(profiles.map((p) => p.id)).toEqual(["juanma", "sergio", "guest"]);
-    expect(matchProfileByPasscode(profiles, "p2")?.id).toBe("sergio");
-    expect(matchProfileByPasscode(profiles, "mal")).toBeNull();
+describe("puerta de acceso e identidad conversacional", () => {
+  it("el passcode general abre la puerta pero NO asigna identidad", () => {
+    const { env } = readEnv({ OPENAI_API_KEY: "sk-t-123456789", APP_ACCESS_PASSWORD: "demo" });
+    expect(matchGatePasscode(env!.gatePasscodes, "demo")).toBe(true);
+    expect(matchGatePasscode(env!.gatePasscodes, "mal")).toBe(false);
+    // Los perfiles conocidos existen por identidad, no por passcode:
+    expect(env!.profiles.map((p) => p.id)).toContain("juanma");
+    expect(env!.profiles.map((p) => p.id)).toContain("sergio");
   });
-  it("ACCESS_PROFILES_JSON con passcodeEnv", () => {
-    const { profiles, error } = resolveProfiles({ ACCESS_PROFILES_JSON: '[{"id":"juanma","role":"owner","passcodeEnv":"OWNER_PASSCODE"}]', OWNER_PASSCODE: "x1" });
+  it("'Soy Sergio' resuelve el perfil sergio; 'soy un inversor' el de inversor", () => {
+    const { profiles } = resolveProfiles({});
+    expect(matchProfileByAlias(profiles, "Soy Sergio")?.id).toBe("sergio");
+    expect(matchProfileByAlias(profiles, "soy sergio, el del robot")?.id).toBe("sergio");
+    expect(matchProfileByAlias(profiles, "soy un inversor")?.id).toBe("investor");
+    expect(matchProfileByAlias(profiles, "soy Juanma")?.id).toBe("juanma");
+    expect(matchProfileByAlias(profiles, "soy nadie conocido xyz")).toBeNull();
+  });
+  it("el owner exige PIN (requiresPin) y KNOWN_PROFILES_JSON extiende alias", () => {
+    const { profiles, error } = resolveProfiles({ KNOWN_PROFILES_JSON: '[{"id":"juanma","aliases":["juan manuel gomez"]}]' });
     expect(error).toBeNull();
-    expect(profiles[0].canViewDebug).toBe(true);
+    const juanmaP = profiles.find((p) => p.id === "juanma")!;
+    expect(juanmaP.requiresPin).toBe(true);
+    expect(matchProfileByAlias(profiles, "soy juan manuel gomez")?.id).toBe("juanma");
   });
-  it("falla claro con JSON inválido y passcodes duplicados", () => {
-    expect(resolveProfiles({ ACCESS_PROFILES_JSON: "{mal" }).error).toContain("JSON");
-    expect(resolveProfiles({ OWNER_PASSCODE: "x", SERGIO_PASSCODE: "x" }).error).toContain("duplicado");
-  });
-  it("readEnv acepta OWNER_PASSCODE sin APP_ACCESS_PASSWORD", () => {
-    const { env } = readEnv({ OPENAI_API_KEY: "sk-t-123456789", OWNER_PASSCODE: "solo-owner" });
-    expect(env).not.toBeNull();
-    expect(env!.profiles[0].id).toBe("juanma");
+  it("perfiles dinámicos: persona nueva = visitante con su propia memoria", () => {
+    const { profiles } = resolveProfiles({});
+    const pablo = getProfileById(profiles, "pablo", true);
+    expect(pablo?.role).toBe("visitor");
+    expect(getProfileById(profiles, "pablo", false)).toBeNull();
   });
 });
 
