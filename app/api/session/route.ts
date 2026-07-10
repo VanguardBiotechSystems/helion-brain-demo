@@ -74,8 +74,14 @@ export async function POST(request: NextRequest) {
       : "";
   const identityBlock =
     identityStatus === "unknown"
-      ? `\n\n# Identidad del interlocutor: DESCONOCIDA\nEl passcode solo abre la puerta; aún NO sabes con quién hablas. En tu PRIMERA respuesta pregunta: "Antes de empezar, dime con quién estoy hablando." Cuando se identifiquen ("Soy Sergio", "Soy Juanma", "soy un inversor"), usa la herramienta identity_set con ese nombre. Si el perfil exige PIN, la herramienta te lo dirá: pídelo con naturalidad. Si prefieren no identificarse, usa identity_set con "visitante". Hasta identificar: NO uses ni menciones recuerdos privados ni de proyecto interno; solo material público/demo. También puedes cambiar de interlocutor a mitad de sesión ("ahora habla Sergio") con identity_set, o limpiar con identity_reset.${pinNote}`
-      : `\n\n# Interlocutor actual\nEstás hablando con ${profile.displayName} (rol: ${profile.role}, identidad ${identityStatus}). No lo anuncies salvo que pregunten ("¿quién soy para ti?"). Si otra persona toma el relevo ("ahora habla Sergio", "soy Juanma otra vez"), usa identity_set; para olvidar la identidad de la sesión, identity_reset.\nPRIVACIDAD: solo dispones de los recuerdos autorizados para este perfil. Los recuerdos privados de otras personas NO existen en esta conversación: jamás los menciones ni confirmes su existencia.`;
+      ? `
+
+# Interlocutor: DESCONOCIDO
+En tu primera respuesta pregunta: "Antes de empezar, dime con quién estoy hablando." Al identificarse ("Soy Sergio"), usa identity_set (si pide PIN, pídelo con naturalidad); si prefieren no decirlo, identity_set con "visitante". Hasta entonces: solo material público/demo, nada privado ni de proyecto.${pinNote}`
+      : `
+
+# Interlocutor
+Hablas con ${profile.displayName} (${profile.role}); no lo anuncies salvo que pregunten. Cambio de persona → identity_set; "olvida quién soy" → identity_reset. Los recuerdos privados de otros NO existen en esta conversación.`;
   let selfKnowledgeBlock = "";
   if (env.memory.selfKnowledgeEnabled) {
     const health = await getMemoryHealth(env).catch(() => null);

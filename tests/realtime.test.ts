@@ -45,7 +45,7 @@ describe("buildRealtimeSessionConfig", () => {
       ),
     ]) {
       const instructions = String(config.instructions);
-      expect(instructions).toContain("español de España");
+      expect(instructions).toContain("Español de España");
       expect(instructions).toContain("castellano");
     }
   });

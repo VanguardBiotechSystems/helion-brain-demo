@@ -107,8 +107,6 @@ export function buildRealtimeSessionConfig(
     instructions: buildAgentInstructions(env.agentName, env.voiceEngine, {
       memoryEnabled: env.memory.enabled,
       memoryContext: extras.memoryContext,
-      fastVoice: env.helion.latencyMode === "fast",
-      maxNormalSentences: env.helion.maxNormalSentences,
       identityBlock: extras.identityBlock,
       selfKnowledgeBlock: extras.selfKnowledgeBlock,
     }),
