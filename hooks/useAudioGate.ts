@@ -85,9 +85,11 @@ export function useAudioGate(
         analyser.getByteTimeDomainData(data);
         const now = performance.now();
         const snap = engine.process(now, rmsFromTimeDomain(data));
-        if (snap.open !== lastOpen) {
-          lastOpen = snap.open;
-          onOpenChangeRef.current(snap.open);
+        // La pista se abre con sendOpen (pre-apertura en candidate) para no
+        // perder el inicio de la frase; la UI "Escuchando" usa snap.state.
+        if (snap.sendOpen !== lastOpen) {
+          lastOpen = snap.sendOpen;
+          onOpenChangeRef.current(snap.sendOpen);
         }
         if (now - lastUiUpdate >= UI_THROTTLE_MS) {
           lastUiUpdate = now;
@@ -129,7 +131,7 @@ export function useAudioGate(
 
   return {
     gateState: enabled && snapshot ? snapshot.state : "off",
-    open: snapshot?.open ?? false,
+    open: snapshot?.sendOpen ?? false,
     noiseFloor: snapshot?.noiseFloor ?? 0,
     threshold: snapshot?.threshold ?? 0,
     blockedNoises: snapshot?.blockedNoises ?? 0,

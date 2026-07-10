@@ -13,30 +13,33 @@ La pieza clave: **al modelo solo viaja un clon de la pista del micrófono, silen
 ```
 calibrating ──(2 s midiendo la sala)──► idle (En espera)
 idle ──(RMS ≥ umbral)──► candidate (Voz detectada…)
-candidate ──(energía sostenida ≥ 300 ms)──► open (Escuchando: el audio fluye)
-candidate ──(ráfaga < 180 ms que cae)──► idle  [+1 ruido bloqueado]
+candidate ──(ráfaga ≥ spikeRejectionMs)──► LA PISTA SE PRE-ABRE (sendOpen)
+candidate ──(energía sostenida ≥ minSpeechMs)──► open (Escuchando)
+candidate ──(ráfaga corta que cae)──► idle  [+1 ruido bloqueado, pista cerrada]
 open ──(energía cae > 200 ms)──► hangover (sigue abierto 700 ms para no cortar palabras)
 hangover ──(silencio mantenido)──► idle · ──(vuelve la voz)──► open
 ```
 
-- **Umbral dinámico**: `max(ruidoDeFondo × LOCAL_AUDIO_THRESHOLD_MULTIPLIER, 0.01)`. La calibración inicial usa el percentil 75 de los primeros `LOCAL_AUDIO_CALIBRATION_MS` ms; en reposo el suelo de ruido se adapta lentamente al ambiente. Botón **«Calibrar ambiente»** en diagnóstico para recalibrar al cambiar de sala.
-- **Rechazo de picos**: una tecla o un golpe es una ráfaga breve (<180 ms). Las ráfagas cortas pierden la tolerancia de huecos (rechazo casi instantáneo), así el tecleo rápido no encadena picos hasta abrir el gate. La voz real (segmentos sostenidos con huecos de sílaba ≤140 ms) sí abre tras 300 ms.
+- **Umbral dinámico**: `max(ruidoDeFondo × LOCAL_AUDIO_THRESHOLD_MULTIPLIER, 0.008)`. La calibración inicial usa el percentil 75 de los primeros `LOCAL_AUDIO_CALIBRATION_MS` ms; en reposo el suelo de ruido se adapta lentamente al ambiente. Botón **«Calibrar ambiente»** en diagnóstico (modo avanzado) para recalibrar al cambiar de sala.
+- **Pre-apertura (no perder el inicio de frase)**: la pista hacia el modelo se abre ya en fase *candidate*, en cuanto la ráfaga supera `spikeRejectionMs` (~160 ms) — no espera la confirmación completa. Los picos cortos confirmados (teclas, golpes) nunca llegan a abrirla; si un ruido sostenido raro se cuela un instante, el VAD del servidor hace de segundo filtro. Un pre-roll real (recuperar audio anterior a la apertura) no es viable clonando pistas WebRTC — se compensa con esta pre-apertura + `prefix_padding_ms` alto (400 ms).
+- **Rechazo de picos**: las ráfagas más cortas que `spikeRejectionMs` pierden la tolerancia de huecos (rechazo casi instantáneo), así el tecleo rápido no encadena picos. La voz real (segmentos sostenidos con huecos de sílaba ≤140 ms) confirma tras `minSpeechMs`.
 - **Histéresis + hangover**: el gate cierra con un umbral inferior (×0.6) y 700 ms de margen para no cortar finales de frase.
-- **Coste asumido**: los primeros ~300 ms de cada frase no llegan al modelo (el gate aún está confirmando). En la práctica se pierde como mucho el arranque de la primera sílaba; es el precio del rechazo de ruido y es configurable (`LOCAL_AUDIO_MIN_SPEECH_MS`).
+- **Coste asumido**: se pierden solo los primeros ~160 ms de la frase (parte del primer fonema). Decir "Helion, ¿me escuchas?" conserva el "Helion" casi íntegro.
 
 Con `LOCAL_AUDIO_GATE_ENABLED=false` se recupera el comportamiento anterior (audio siempre fluye y "Escuchando" = conectado).
 
 ## Capa 3 — VAD y reducción de ruido de OpenAI
 
-Configurable por perfil (`AUDIO_PROFILE`) con overrides individuales:
+Configurable por perfil (`AUDIO_PROFILE`) con overrides individuales. Los perfiles fijan también los defaults del gate local (multiplicador, confirmación de voz, rechazo de picos):
 
-| Perfil | turn_detection | threshold | silence | prefix | noise_reduction |
-| --- | --- | --- | --- | --- | --- |
-| `laptop_demo` (defecto) | `server_vad` | 0.6 | 700 ms | 300 ms | `near_field` |
-| `near_field` | `semantic_vad` (eagerness auto) | — | — | — | `near_field` |
-| `far_field` / `robot_room` | `server_vad` | 0.65 | 800 ms | 400 ms | `far_field` |
+| Perfil | turn_detection | threshold | silence | prefix | noise_reduction | gate (mult / voz / pico) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `demo_balanced` (defecto) | `server_vad` | 0.5 | 650 ms | 400 ms | `near_field` | 2.0 / 220 ms / 160 ms |
+| `laptop_demo` (estricto) | `server_vad` | 0.6 | 700 ms | 300 ms | `near_field` | 2.5 / 300 ms / 180 ms |
+| `near_field` | `semantic_vad` (eagerness auto) | — | — | — | `near_field` | 2.2 / 250 ms / 170 ms |
+| `far_field` / `robot_room` | `server_vad` | 0.65 | 800 ms | 400 ms | `far_field` | 2.5 / 300 ms / 180 ms |
 
-Racional: `server_vad` con umbral 0.6 y 700 ms de silencio es deliberadamente conservador — preferimos 200-400 ms más de latencia a falsos positivos. `semantic_vad` (turnos más naturales) sigue disponible: `OPENAI_TURN_DETECTION=semantic_vad` + `OPENAI_VAD_EAGERNESS=low|medium|high|auto`. `input_audio_noise_reduction` se configura explícitamente: `near_field` para micro cercano (portátil), `far_field` para micro lejano (robot en una habitación), `off` para desactivar.
+Racional: `demo_balanced` está calibrado para hablar a volumen conversacional a 50-80 cm del portátil sin levantar la voz y sin perder el inicio de frase, manteniendo el rechazo de tecleo/golpes. Si el entorno es ruidoso y hay falsos positivos, sube a `laptop_demo`. `semantic_vad` (turnos más naturales) sigue disponible: `OPENAI_TURN_DETECTION=semantic_vad` + `OPENAI_VAD_EAGERNESS=low|medium|high|auto`. `input_audio_noise_reduction` se configura explícitamente: `near_field` para micro cercano (portátil), `far_field` para micro lejano (robot en una habitación), `off` para desactivar.
 
 ## Semántica de estados en la UI
 

@@ -50,19 +50,19 @@ describe("AudioGateEngine — calibración y umbral dinámico", () => {
     const snap = engine.snapshot();
     expect(snap.state).toBe("idle");
     expect(snap.noiseFloor).toBeCloseTo(0.004, 3);
-    // max(0.004 × 2.5, minThreshold 0.01) = 0.01
-    expect(snap.threshold).toBeCloseTo(0.01, 3);
+    // max(0.004 × 2.0, minThreshold 0.008) = 0.008
+    expect(snap.threshold).toBeCloseTo(0.008, 3);
   });
 
   it("en una sala ruidosa el umbral sube proporcionalmente", () => {
     const { engine } = calibrated(0.02);
-    expect(engine.snapshot().threshold).toBeCloseTo(0.05, 3);
+    expect(engine.snapshot().threshold).toBeCloseTo(0.04, 3);
   });
 
   it("el suelo de ruido se adapta lentamente en idle", () => {
     const { engine, t } = calibrated(0.004);
     const before = engine.snapshot().threshold;
-    feed(engine, t, 30000, 0.009); // ambiente algo más ruidoso, bajo umbral
+    feed(engine, t, 30000, 0.006); // ambiente algo más ruidoso, bajo umbral
     expect(engine.snapshot().threshold).toBeGreaterThan(before);
     expect(engine.snapshot().state).toBe("idle");
   });
@@ -164,5 +164,34 @@ describe("AudioGateEngine — detección de voz", () => {
     const { engine, t } = calibrated();
     feed(engine, t, 800, 0.08);
     expect(engine.snapshot().blockedNoises).toBe(0);
+  });
+});
+
+describe("AudioGateEngine — pre-apertura de pista (sendOpen)", () => {
+  it("la pista se abre en fase candidate al superar spikeRejectionMs (no se pierde el inicio)", () => {
+    const { engine, t } = calibrated();
+    feed(engine, t, CONFIG.spikeRejectionMs + 20, 0.08);
+    const snap = engine.snapshot();
+    expect(snap.state).toBe("candidate"); // aún confirmando (UI: voz detectada)
+    expect(snap.open).toBe(false);
+    expect(snap.sendOpen).toBe(true); // pero el audio YA fluye al modelo
+  });
+
+  it("un pico corto nunca llega a abrir la pista (sendOpen false)", () => {
+    const { engine, t } = calibrated();
+    feed(engine, t, 100, 0.3); // tecla: 100 ms < spikeRejectionMs
+    expect(engine.snapshot().sendOpen).toBe(false);
+    feed(engine, t + 100, 300, 0.002);
+    expect(engine.snapshot().sendOpen).toBe(false);
+  });
+
+  it("sendOpen se cierra si el candidato se rechaza", () => {
+    const { engine, t } = calibrated();
+    let now = feed(engine, t, CONFIG.spikeRejectionMs + 20, 0.08); // pre-abre
+    expect(engine.snapshot().sendOpen).toBe(true);
+    now = feed(engine, now, 300, 0.002); // cae antes de minSpeechMs
+    expect(engine.snapshot().state).toBe("idle");
+    expect(engine.snapshot().sendOpen).toBe(false);
+    void now;
   });
 });

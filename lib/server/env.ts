@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
  */
 
 export type VoiceEngine = "openai_realtime" | "elevenlabs";
-export type AudioProfile = "laptop_demo" | "near_field" | "far_field" | "robot_room";
+export type AudioProfile = "demo_balanced" | "laptop_demo" | "near_field" | "far_field" | "robot_room";
 export type TurnDetectionMode = "semantic_vad" | "server_vad";
 export type NoiseReductionMode = "near_field" | "far_field" | "off";
 export type VadEagerness = "low" | "medium" | "high" | "auto";
@@ -79,20 +79,41 @@ export interface EnvResult {
 
 const REQUIRED = ["OPENAI_API_KEY", "APP_ACCESS_PASSWORD"] as const;
 
+interface AudioProfilePreset
+  extends Pick<
+    AudioConfig,
+    "turnDetection" | "vadThreshold" | "vadSilenceMs" | "vadPrefixPaddingMs" | "vadEagerness" | "noiseReduction"
+  > {
+  gateThresholdMultiplier: number;
+  gateMinSpeechMs: number;
+  gateSpikeRejectionMs: number;
+}
+
 /**
  * Perfiles de escucha. Un perfil define valores razonables para el VAD de
- * OpenAI y la reducción de ruido; cualquier variable individual (OPENAI_*)
- * los sobreescribe. Ver docs/AUDIO_GATE.md.
+ * OpenAI, la reducción de ruido y el gate local; cualquier variable
+ * individual (OPENAI_* / LOCAL_AUDIO_*) los sobreescribe. Ver docs/AUDIO_GATE.md.
  *
- * - laptop_demo (por defecto): demo en portátil cerca del usuario.
- *   server_vad conservador (umbral 0.6, 700 ms de silencio) + near_field.
+ * - demo_balanced (por defecto): equilibrio para demo en portátil — detecta
+ *   voz a volumen conversacional sin perder inicios de frase, y sigue
+ *   ignorando tecleo y golpes. VAD 0.5/650 ms + prefix 400 ms.
+ * - laptop_demo: variante estricta (entornos ruidosos): umbral más alto y
+ *   confirmación de voz más larga.
  * - near_field: micro cercano con turnos naturales (semantic_vad).
  * - far_field / robot_room: micro lejano en habitación; VAD más exigente.
  */
-const AUDIO_PROFILES: Record<
-  AudioProfile,
-  Pick<AudioConfig, "turnDetection" | "vadThreshold" | "vadSilenceMs" | "vadPrefixPaddingMs" | "vadEagerness" | "noiseReduction">
-> = {
+const AUDIO_PROFILES: Record<AudioProfile, AudioProfilePreset> = {
+  demo_balanced: {
+    turnDetection: "server_vad",
+    vadThreshold: 0.5,
+    vadSilenceMs: 650,
+    vadPrefixPaddingMs: 400,
+    vadEagerness: "low",
+    noiseReduction: "near_field",
+    gateThresholdMultiplier: 2.0,
+    gateMinSpeechMs: 220,
+    gateSpikeRejectionMs: 160,
+  },
   laptop_demo: {
     turnDetection: "server_vad",
     vadThreshold: 0.6,
@@ -100,6 +121,9 @@ const AUDIO_PROFILES: Record<
     vadPrefixPaddingMs: 300,
     vadEagerness: "low",
     noiseReduction: "near_field",
+    gateThresholdMultiplier: 2.5,
+    gateMinSpeechMs: 300,
+    gateSpikeRejectionMs: 180,
   },
   near_field: {
     turnDetection: "semantic_vad",
@@ -108,6 +132,9 @@ const AUDIO_PROFILES: Record<
     vadPrefixPaddingMs: 300,
     vadEagerness: "auto",
     noiseReduction: "near_field",
+    gateThresholdMultiplier: 2.2,
+    gateMinSpeechMs: 250,
+    gateSpikeRejectionMs: 170,
   },
   far_field: {
     turnDetection: "server_vad",
@@ -116,6 +143,9 @@ const AUDIO_PROFILES: Record<
     vadPrefixPaddingMs: 400,
     vadEagerness: "low",
     noiseReduction: "far_field",
+    gateThresholdMultiplier: 2.5,
+    gateMinSpeechMs: 300,
+    gateSpikeRejectionMs: 180,
   },
   robot_room: {
     turnDetection: "server_vad",
@@ -124,6 +154,9 @@ const AUDIO_PROFILES: Record<
     vadPrefixPaddingMs: 400,
     vadEagerness: "low",
     noiseReduction: "far_field",
+    gateThresholdMultiplier: 2.5,
+    gateMinSpeechMs: 300,
+    gateSpikeRejectionMs: 180,
   },
 };
 
@@ -154,8 +187,8 @@ function parseEnum<T extends string>(raw: string | undefined, allowed: readonly 
 function readAudioConfig(source: Record<string, string | undefined>): AudioConfig {
   const profile = parseEnum<AudioProfile>(
     source.AUDIO_PROFILE,
-    ["laptop_demo", "near_field", "far_field", "robot_room"],
-    "laptop_demo",
+    ["demo_balanced", "laptop_demo", "near_field", "far_field", "robot_room"],
+    "demo_balanced",
   );
   const preset = AUDIO_PROFILES[profile];
 
@@ -182,9 +215,19 @@ function readAudioConfig(source: Record<string, string | undefined>): AudioConfi
     gate: {
       enabled: parseBoolean(source.LOCAL_AUDIO_GATE_ENABLED, true),
       calibrationMs: parseNumber(source.LOCAL_AUDIO_CALIBRATION_MS, 2000, 500, 10000),
-      minSpeechMs: parseNumber(source.LOCAL_AUDIO_MIN_SPEECH_MS, 300, 100, 2000),
-      spikeRejectionMs: parseNumber(source.LOCAL_AUDIO_SPIKE_REJECTION_MS, 180, 40, 1000),
-      thresholdMultiplier: parseNumber(source.LOCAL_AUDIO_THRESHOLD_MULTIPLIER, 2.5, 1.2, 10),
+      minSpeechMs: parseNumber(source.LOCAL_AUDIO_MIN_SPEECH_MS, preset.gateMinSpeechMs, 100, 2000),
+      spikeRejectionMs: parseNumber(
+        source.LOCAL_AUDIO_SPIKE_REJECTION_MS,
+        preset.gateSpikeRejectionMs,
+        40,
+        1000,
+      ),
+      thresholdMultiplier: parseNumber(
+        source.LOCAL_AUDIO_THRESHOLD_MULTIPLIER,
+        preset.gateThresholdMultiplier,
+        1.2,
+        10,
+      ),
       autoGainControl: parseBoolean(source.LOCAL_AUDIO_AGC, false),
     },
   };

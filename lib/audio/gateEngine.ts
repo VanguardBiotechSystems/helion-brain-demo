@@ -35,10 +35,10 @@ export interface AudioGateConfig {
 
 export const DEFAULT_GATE_CONFIG: AudioGateConfig = {
   calibrationMs: 2000,
-  minSpeechMs: 300,
-  spikeRejectionMs: 180,
-  thresholdMultiplier: 2.5,
-  minThreshold: 0.01,
+  minSpeechMs: 220,
+  spikeRejectionMs: 160,
+  thresholdMultiplier: 2.0,
+  minThreshold: 0.008,
   exitMultiplier: 0.6,
   hangoverMs: 700,
   maxCandidateGapMs: 140,
@@ -46,8 +46,16 @@ export const DEFAULT_GATE_CONFIG: AudioGateConfig = {
 
 export interface GateSnapshot {
   state: GateState;
-  /** true si el audio debe fluir hacia el modelo (open o hangover). */
+  /** Voz CONFIRMADA (estado open o hangover): gobierna la UI "Escuchando". */
   open: boolean;
+  /**
+   * Pre-apertura de la pista hacia el modelo: true también durante la fase
+   * candidate en cuanto la ráfaga supera spikeRejectionMs. Así el modelo
+   * recibe el inicio de la frase (solo se pierden ~spikeRejectionMs) sin
+   * dejar pasar los picos cortos confirmados; el VAD del servidor hace de
+   * segundo filtro para el poco ruido sostenido que se cuele.
+   */
+  sendOpen: boolean;
   noiseFloor: number;
   threshold: number;
   /** Picos/ruidos bloqueados desde la última calibración. */
@@ -98,9 +106,14 @@ export class AudioGateEngine {
   }
 
   snapshot(): GateSnapshot {
+    const confirmed = this.state === "open" || this.state === "hangover";
+    const candidateBurstMs =
+      this.state === "candidate" ? this.lastAboveThreshold - this.candidateStart : 0;
     return {
       state: this.state,
-      open: this.state === "open" || this.state === "hangover",
+      open: confirmed,
+      sendOpen:
+        confirmed || (this.state === "candidate" && candidateBurstMs >= this.config.spikeRejectionMs),
       noiseFloor: this.noiseFloor,
       threshold: this.threshold,
       blockedNoises: this.blockedNoises,

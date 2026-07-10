@@ -38,16 +38,27 @@ describe("readEnv", () => {
     expect(env!.elevenLabsOutputFormat).toBe("mp3_44100_128");
   });
 
-  it("perfil de audio por defecto: laptop_demo con server_vad conservador", () => {
+  it("perfil de audio por defecto: demo_balanced (equilibrado para voz conversacional)", () => {
     const { env } = readEnv(BASE);
-    expect(env!.audio.profile).toBe("laptop_demo");
+    expect(env!.audio.profile).toBe("demo_balanced");
     expect(env!.audio.turnDetection).toBe("server_vad");
-    expect(env!.audio.vadThreshold).toBe(0.6);
-    expect(env!.audio.vadSilenceMs).toBe(700);
+    expect(env!.audio.vadThreshold).toBe(0.5);
+    expect(env!.audio.vadSilenceMs).toBe(650);
+    expect(env!.audio.vadPrefixPaddingMs).toBe(400);
     expect(env!.audio.noiseReduction).toBe("near_field");
     expect(env!.audio.gate.enabled).toBe(true);
-    expect(env!.audio.gate.minSpeechMs).toBe(300);
+    expect(env!.audio.gate.minSpeechMs).toBe(220);
+    expect(env!.audio.gate.spikeRejectionMs).toBe(160);
+    expect(env!.audio.gate.thresholdMultiplier).toBe(2.0);
     expect(env!.audio.gate.autoGainControl).toBe(false);
+  });
+
+  it("laptop_demo queda como variante estricta", () => {
+    const { env } = readEnv({ ...BASE, AUDIO_PROFILE: "laptop_demo" });
+    expect(env!.audio.vadThreshold).toBe(0.6);
+    expect(env!.audio.vadSilenceMs).toBe(700);
+    expect(env!.audio.gate.minSpeechMs).toBe(300);
+    expect(env!.audio.gate.thresholdMultiplier).toBe(2.5);
   });
 
   it("el perfil robot_room usa far_field y VAD más exigente", () => {
@@ -75,7 +86,7 @@ describe("readEnv", () => {
 
   it("valores numéricos inválidos caen al default del perfil", () => {
     const { env } = readEnv({ ...BASE, OPENAI_VAD_THRESHOLD: "no-es-numero" });
-    expect(env!.audio.vadThreshold).toBe(0.6);
+    expect(env!.audio.vadThreshold).toBe(0.5);
   });
 
   it("memoria: defaults razonables", () => {
@@ -157,7 +168,7 @@ describe("readEnv", () => {
 
   it("ignora valores no válidos de turn detection (cae al perfil)", () => {
     const { env } = readEnv({ ...BASE, OPENAI_TURN_DETECTION: "invented_vad" });
-    expect(env!.audio.turnDetection).toBe("server_vad"); // default de laptop_demo
+    expect(env!.audio.turnDetection).toBe("server_vad"); // default de demo_balanced
   });
 
   it("deriva un secreto de sesión estable si falta SESSION_SECRET", () => {
