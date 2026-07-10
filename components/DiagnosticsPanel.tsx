@@ -40,6 +40,25 @@ interface ServerConfig {
   memory?: { enabled?: boolean; provider?: string };
 }
 
+interface MemoryStatsResponse {
+  scope: "full" | "tech";
+  stats: {
+    byStatus: Record<string, number>;
+    byType: Record<string, number>;
+    byAssertionType: Record<string, number>;
+    pending: number;
+    expiredOrArchived: number;
+    relations: { updates: number; contradicts: number; supersedes: number; total: number };
+    security: { rejected: number; byCode: Record<string, number> };
+  };
+  profiles: Array<{ id: string; displayName: string; role: string; origin: string; status: string; lastUsedAt: string; memoryCount?: number }>;
+}
+
+function countMap(map: Record<string, number>): string {
+  const entries = Object.entries(map);
+  return entries.length ? entries.map(([k, v]) => `${k}: ${v}`).join(" · ") : "—";
+}
+
 function percentile(sorted: number[], p: number): number | null {
   if (sorted.length === 0) return null;
   return sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))];
@@ -61,8 +80,9 @@ export default function DiagnosticsPanel({
   onCalibrate: () => void;
 }) {
   const [config, setConfig] = useState<ServerConfig | null>(null);
+  const [memStats, setMemStats] = useState<MemoryStatsResponse | null>(null);
   const [browserInfo, setBrowserInfo] = useState({ userAgent: "", webrtc: false, online: true });
-  const [identity, setIdentity] = useState<{ displayName?: string; role?: string; identityStatus?: string; trustLevel?: string; memoryScopes?: string[] } | null>(null);
+  const [identity, setIdentity] = useState<{ displayName?: string; role?: string; identityStatus?: string; trustLevel?: string; memoryScopes?: string[]; plane?: string; capabilities?: string[] } | null>(null);
   const [voiceTest, setVoiceTest] = useState<{ state: "idle" | "loading" | "playing" | "error"; message: string }>({
     state: "idle",
     message: "",
@@ -104,6 +124,11 @@ export default function DiagnosticsPanel({
       online: navigator.onLine,
     });
     fetch("/api/identity/current").then((r) => (r.ok ? r.json() : null)).then(setIdentity).catch(() => {});
+    // Métricas agregadas (sin contenido privado); 403 si no hay permiso.
+    fetch("/api/memory/stats")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body: MemoryStatsResponse | null) => setMemStats(body))
+      .catch(() => {});
     if (!config) {
       fetch("/api/config")
         .then((response) => (response.ok ? response.json() : null))
@@ -152,6 +177,8 @@ export default function DiagnosticsPanel({
 
   const rows: Array<[string, string]> = [
     ["Identidad actual", identity ? `${identity.displayName} · ${identity.role} · ${identity.identityStatus} · ${identity.trustLevel}` : "—"],
+    ["Plano de identidad", identity?.plane ?? "—"],
+    ["Capacidades activas", identity?.capabilities?.length ? identity.capabilities.join(", ") : "ninguna"],
     ["Scopes de memoria", identity?.memoryScopes?.join(", ") ?? "—"],
     ["Modelo realtime", model],
     ["Motor de voz", engine],
@@ -236,6 +263,34 @@ export default function DiagnosticsPanel({
             ));
           })()}
         </dl>
+
+        {memStats && (
+          <>
+            <h3 className="diag-subtitle">Memoria (transparencia)</h3>
+            <dl className="diag-grid">
+              <div className="diag-row"><dt>Activas por tipo</dt><dd>{countMap(memStats.stats.byType)}</dd></div>
+              <div className="diag-row"><dt>Por clase de afirmación</dt><dd>{countMap(memStats.stats.byAssertionType)}</dd></div>
+              <div className="diag-row"><dt>Pendientes de confirmación</dt><dd>{memStats.stats.pending}</dd></div>
+              <div className="diag-row"><dt>Archivadas o caducadas</dt><dd>{memStats.stats.expiredOrArchived}</dd></div>
+              <div className="diag-row"><dt>Relaciones de sustitución</dt><dd>{memStats.stats.relations.supersedes}</dd></div>
+              <div className="diag-row"><dt>Rechazos de seguridad</dt><dd>{memStats.stats.security.rejected}</dd></div>
+              <div className="diag-row"><dt>Motivos de rechazo (códigos)</dt><dd>{countMap(memStats.stats.security.byCode)}</dd></div>
+            </dl>
+            {memStats.scope === "full" && memStats.profiles.length > 0 && (
+              <>
+                <h3 className="diag-subtitle">Perfiles ({memStats.profiles.length})</h3>
+                <dl className="diag-grid">
+                  {memStats.profiles.map((p) => (
+                    <div className="diag-row" key={p.id}>
+                      <dt>{p.displayName} · {p.role}</dt>
+                      <dd>{p.origin} · {p.status} · último uso {new Date(p.lastUsedAt).toLocaleDateString()}{typeof p.memoryCount === "number" ? ` · ${p.memoryCount} rec.` : ""}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </>
+            )}
+          </>
+        )}
 
         {data.lastLatency && (
           <>

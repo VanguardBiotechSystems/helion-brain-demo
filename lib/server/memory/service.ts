@@ -7,6 +7,7 @@ import { containsSecret, SECRET_REJECTION_MESSAGE } from "./redaction";
 import {
   classifyCandidateSafety,
   recordSecurityEvent,
+  securityStats,
   UNSAFE_REJECTION_MESSAGE,
   type SecurityCode,
 } from "./sanitizer";
@@ -511,6 +512,55 @@ export async function consolidateMemories(store: MemoryStore): Promise<{ merged:
 
 export { makeEmbedder, SECRET_REJECTION_MESSAGE, canProfileAccessMemory, filterMemoriesForProfile };
 export type { CuratorInputMessage };
+
+export interface MemoryStats {
+  byStatus: Record<string, number>;
+  byType: Record<string, number>;
+  byAssertionType: Record<string, number>;
+  pending: number;
+  expiredOrArchived: number;
+  relations: { updates: number; contradicts: number; supersedes: number; total: number };
+  security: { rejected: number; byCode: Record<string, number> };
+}
+
+/**
+ * Métricas agregadas para el panel de transparencia (sección 10). NO expone
+ * texto de recuerdos: solo recuentos y códigos. Se sirve bajo autorización.
+ */
+export async function getMemoryStats(store: MemoryStore): Promise<MemoryStats> {
+  const all = await store.list({ status: "all", limit: 1000 });
+  const byStatus: Record<string, number> = {};
+  const byType: Record<string, number> = {};
+  const byAssertionType: Record<string, number> = {};
+  const now = Date.now();
+  let expiredOrArchived = 0;
+  for (const m of all) {
+    byStatus[m.status] = (byStatus[m.status] ?? 0) + 1;
+    if (m.status === "active") {
+      byType[m.type] = (byType[m.type] ?? 0) + 1;
+      byAssertionType[m.assertionType] = (byAssertionType[m.assertionType] ?? 0) + 1;
+    }
+    if (m.status === "archived" || (m.expiresAt && Date.parse(m.expiresAt) <= now)) expiredOrArchived += 1;
+  }
+  // Recuento de relaciones desde el log de eventos (barato y sin contenido).
+  const events = await store.listEvents(undefined, 1000);
+  const rel = { updates: 0, contradicts: 0, supersedes: 0, total: 0 };
+  for (const e of events) {
+    if (e.action === "updated" && e.reason.includes("sustituido por")) {
+      rel.supersedes += 1;
+      rel.total += 1;
+    }
+  }
+  return {
+    byStatus,
+    byType,
+    byAssertionType,
+    pending: byStatus.pending ?? 0,
+    expiredOrArchived,
+    relations: rel,
+    security: securityStats(),
+  };
+}
 
 export interface MemoryHealth {
   enabled: boolean;

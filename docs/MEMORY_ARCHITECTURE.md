@@ -65,3 +65,50 @@ Con el almacén vacío se insertan 7 recuerdos `system` (qué es Helion, reglas 
 - Un solo perfil (`default`); multi-usuario requeriría autenticación por persona.
 - La consolidación es heurística (similitud), no razonada por modelo.
 - Provider local en serverless = memoria efímera por instancia (usar Postgres).
+
+---
+
+# Bloque 2 — Memoria cognitiva, identidad natural y cierre de inyección
+
+## 1. Clase de afirmación (`assertionType`)
+
+Cada recuerdo lleva `assertionType`: `fact` (realidad estable), `opinion` (preferencia/valoración de una persona), `instruction` (petición atribuida a una persona — NUNCA orden del sistema), `ephemeral` (vale poco tiempo, con `expiresAt`; 48 h por defecto sin duración expresa) o `unclassified` (estado explícito para lo dudoso/heredado). Migración idempotente y reversible (`ALTER TABLE … ADD COLUMN IF NOT EXISTS assertion_type`); backfill conservador: `preference→opinion`, `system→fact`, resto→`unclassified`. Gobierna curación, ranking y retención.
+
+## 2-3. Cierre del vector de inyección persistente (voz → memoria → prompt)
+
+Defensa por capas (`sanitizer.ts`, `retrieval.ts`):
+
+- **A. Detección** — clasificador determinista de metainstrucciones (`classifyCandidateSafety`): normaliza NFKC, minúsculas, homóglifos cirílicos/griegos, zero-width, y compara contra patrones anclados a verbo+objeto (ES/EN) + forma compacta contra fragmentación. Códigos: `META_IGNORE/REVEAL/ROLE/OVERRIDE/PRIVILEGE/MEMORY_AUTHORITY/SECRET`.
+- **B. Almacenamiento** — un candidato marcado se RECHAZA en `createMemory` antes de persistir; se registra evento de seguridad agregado (códigos + hash corto del texto normalizado), nunca el texto íntegro.
+- **C. Canonicalización** — solo entra `canonicalContent`; el texto bruto no se expone a las instrucciones.
+- **D. Encapsulado** — `buildSecureMemoryContext` envuelve los recuerdos en un preámbulo que los declara DATOS no autoritativos + delimitador `<recuerdos>` con cada recuerdo serializado en JSON (no puede cerrar el delimitador ni inyectar líneas). Defensa en profundidad: `neutralizeStoredContent` sustituye por nota canónica cualquier metainstrucción almacenada y limpia tokens del delimitador.
+- **E. Filtrado final** — excluye archivadas/pending/caducadas, aplica permisos server-side ANTES del ranking, limita cantidad/longitud, redacta secretos. `memory_recall` también se neutraliza.
+- **F. Corpus adversarial** — `tests/injection.test.ts`: ES/EN, Unicode, homóglifos, zero-width, fragmentado; prueba el ciclo completo y la ausencia del ataque con autoridad en el prompt final.
+
+## 4. Revisión de creencias (`relations.ts`)
+
+`classifyRelation` distingue `duplicates/updates/contradicts/supports/supersedes` con umbrales calibrados por método: coseno (0,75–0,92) vs solapamiento de palabras (0,25–0,8, distinta escala). Una actualización crea relación auditable y reduce la confianza del previo (`decayedConfidenceOnSupersede`: mitad, con suelo 0,1); una contradicción conserva ambas.
+
+## 5. Decaimiento y consolidación (`consolidation.ts`)
+
+Fórmula: `step = DECAY_BASE(0.15) × factorEdad × factorTipo × (1−uso) × (1−importancia)`; ventana de gracia 14 días, suelo 0,1, seguridad/`system_self` intocables. La pasada expira efímeros, archiva episodios viejos irrelevantes, decae confianza, fusiona casi-duplicados, expira pendientes y archiva perfiles inactivos. Por lotes, `dry-run`, idempotente (ventana de 1 h). Cron `GET /api/memory/consolidate` protegido por `MEMORY_CONSOLIDATION_SECRET`/`CRON_SECRET` (Bearer; 404 a sondas) + `vercel.json`; `POST` manual solo owner confirmado.
+
+## 6. Confirmación de contenido sensible (`pending.ts`)
+
+Estado `pending` con `confirmationId` de un solo uso, ligado al propietario y a la sesión, caducidad 30 min. No entra en recuperación; solo el dueño correcto confirma/descarta; sin replay; barrido de caducadas. `memory_save` sensible → pendiente + `confirmationId`; herramienta realtime `memory_confirm` y `POST /api/memory/confirm` lo resuelven. El curador deja lo sensible pendiente en vez de descartarlo.
+
+## 7. Identidad al regresar (`authz.ts`, session route)
+
+Cuatro planos separados: acceso (passcode), sugerido (cookie sin confirmar), confirmado, privilegiado (owner con PIN/step-up). Una identidad SUGERIDA reconoce con duda ("¿Sigues siendo tú?") y NO abre memoria privada ni de proyecto hasta confirmar (`filterMemoriesForRetrieval`, `confirmed` en session/search). El cambio explícito de identidad sigue reiniciando el contexto privado.
+
+## 8. Matriz de roles (`authz.ts`)
+
+Fuente única `can(profile, status, capability)`. Roles: `owner, robot_creator, technician, team, investor, visitor`. El `technician` accede a estado técnico/salud/`system_self` pero NUNCA a memoria personal, herramientas de owner ni secretos. Tests parametrizados recorren la matriz completa.
+
+## 9. Ciclo de vida de perfiles (`profileLifecycle.ts`)
+
+`recordProfileUsage/listProfiles/setProfileStatus` en ambos stores. Registro de creación/último uso; archivo por inactividad (>30 días, salvo fijados/known) vía `POST /api/profiles` owner-only e integrado en la consolidación. Fusión: contrato documentado (no implementada por exigir transacción segura).
+
+## 10. Panel de transparencia
+
+`GET /api/memory/stats` (agregados sin texto: recuentos por tipo/afirmación/estado, pendientes, relaciones, rechazos por código, perfiles) gateado por `view_debug`/`view_tech_status`. El técnico ve métricas técnicas pero no metadatos de perfiles. Renderizado en `DiagnosticsPanel` con plano de identidad y capacidades activas.
