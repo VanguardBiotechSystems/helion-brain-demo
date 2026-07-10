@@ -12,7 +12,7 @@ Helion es una aplicación web que da voz, oído y razonamiento a un robot humano
 - **Dos motores de voz:** `openai_realtime` (speech-to-speech, latencia mínima, por defecto) o `elevenlabs` (voz española nativa sintetizada en servidor). Ver [Voz en español de España](#voz-en-español-de-españa).
 - **Seguridad de claves:** la API key de OpenAI vive solo en el servidor. El navegador recibe únicamente un token efímero que caduca en minutos.
 - **Acceso protegido:** passcode + cookie firmada (HMAC-SHA256, httpOnly). Rate limiting por IP en login, creación de sesiones y chat.
-- **UI de producto:** orbe de estado animado (escuchando / pensando / hablando / reconectando / error), subtítulos en vivo, latencia aproximada, controles para mutear, cortar la voz, reiniciar sesión y borrar conversación.
+- **UI de producto en dos caras:** experiencia pública minimalista (orbe aurora vivo + estado + botón liquid glass, sin chat ni paneles) y consola técnica oculta (subtítulos en vivo, latencia, mute, cortar voz, reiniciar, diagnóstico y memoria) tras triple clic en el estado o `?debug=1`.
 - **Fallback textual:** si el micrófono o WebRTC fallan, una caja de texto habla con el mismo cerebro vía `/api/chat` (pipeline texto → LLM → texto).
 - **Robot simulado:** el agente dispone de una herramienta `robot_gesture` que registra intenciones de gestos (saludar, mover la cabeza…) visibles como tarjetas en pantalla. Nada toca hardware real.
 - **Diagnóstico ocultable:** modelo, voz, estado de sesión, WebRTC, último error, navegador y recomendaciones.
@@ -53,7 +53,7 @@ Copia `.env.example` a `.env.local` y rellena los valores. Resumen:
 | `ELEVENLABS_VOICE_ID` | si `elevenlabs` | — | ID de la voz española elegida. |
 | `ELEVENLABS_MODEL` | — | `eleven_flash_v2_5` | Modelo TTS de baja latencia. |
 | `ELEVENLABS_OUTPUT_FORMAT` | — | `mp3_44100_128` | Formato del audio generado. |
-| `AUDIO_PROFILE` | — | `laptop_demo` | Perfil de escucha: `laptop_demo`, `near_field`, `far_field`, `robot_room`. |
+| `AUDIO_PROFILE` | — | `demo_balanced` | Perfil de escucha: `demo_balanced`, `laptop_demo` (estricto), `near_field`, `far_field`, `robot_room`. |
 | `OPENAI_VAD_*` / `OPENAI_NOISE_REDUCTION` | — | según perfil | Overrides finos del VAD (ver [docs/AUDIO_GATE.md](docs/AUDIO_GATE.md)). |
 | `LOCAL_AUDIO_GATE_ENABLED` | — | `true` | Gate local anti-ruido (calibración + umbral dinámico). |
 | `LOCAL_AUDIO_*` | — | ver `.env.example` | Calibración, duración mínima de voz, rechazo de picos, multiplicador, AGC. |
@@ -118,7 +118,7 @@ En cualquier plataforma: **nunca** subas `.env.local`; usa siempre el gestor de 
 1. Abre la URL pública en **Chrome, Edge o Safari recientes** (escritorio recomendado).
 2. Introduce el passcode.
 3. Pulsa **«Conectar cerebro»** y acepta el permiso de micrófono.
-4. Tras «Calibrando ambiente…» el estado queda **«En espera»**: habla con naturalidad y pasará a «Voz detectada…» → «Escuchando». Prueba:
+4. Pulsa **«Encender Helion»**; tras «Calibrando ambiente» el estado queda **«En espera»**: habla con naturalidad y pasará a «Voz detectada» → «Escuchando». Prueba:
    - “Hola, ¿quién eres?”
    - “¿Qué puedes hacer y qué no puedes hacer todavía?”
    - Interrúmpelo a mitad de respuesta (debería callarse y escucharte).
@@ -127,7 +127,7 @@ En cualquier plataforma: **nunca** subas `.env.local`; usa siempre el gestor de 
    - “Recuerda que la demo es mañana a las once” → lo guardará en memoria y lo confirmará.
    - “¿Qué recuerdas del proyecto?” → responderá con sus recuerdos reales.
    - Teclea en el portátil mientras está «En espera» → **no** debe reaccionar (contador de ruidos bloqueados en diagnóstico).
-5. Botón de subtítulos para la transcripción, 🧠 para la memoria y 🔧 para el diagnóstico (incluye «Calibrar ambiente»). Checklist completa de pruebas de audio en [docs/AUDIO_GATE.md](docs/AUDIO_GATE.md).
+5. Para subtítulos, memoria 🧠, diagnóstico 🔧 y controles técnicos: **modo avanzado** (triple clic en la línea de estado o `?debug=1`). Checklist completa de pruebas de audio en [docs/AUDIO_GATE.md](docs/AUDIO_GATE.md) y de handoff en [docs/DEMO_HANDOFF.md](docs/DEMO_HANDOFF.md).
 
 ### Checklist antes de enseñarla
 
@@ -140,7 +140,9 @@ En cualquier plataforma: **nunca** subas `.env.local`; usa siempre el gestor de 
 
 ## Compartir con el creador del robot
 
-Envíale: (1) la URL pública, (2) el passcode, (3) una línea de contexto: *“Es el cerebro conversacional del robot: habla con él; los gestos aparecen como acciones simuladas hasta que conectemos el cuerpo”*. No necesita instalar nada.
+Guía completa paso a paso (Vercel + Postgres + checklist de prueba externa + solución de problemas) en **[docs/DEMO_HANDOFF.md](docs/DEMO_HANDOFF.md)**. En corto: despliega con las variables de entorno, verifica `/api/health`, prueba desde otra red, y envíale la URL y el passcode por canales separados. No necesita instalar nada.
+
+La pantalla pública es minimalista: orbe + estado + botón de encendido. La consola técnica (transcript, diagnóstico, memoria, controles) queda oculta tras **triple clic en la línea de estado** o **`?debug=1`** en la URL.
 
 ## Voz en español de España
 
@@ -226,7 +228,7 @@ El audio realtime se factura por tokens de audio de entrada/salida y es sensible
 - Sin persistencia: no hay historial entre visitas (decisión deliberada de privacidad para la demo).
 - El modo texto fallback no reproduce voz (responde por escrito) cuando no hay sesión de voz activa; con sesión activa, lo escrito sí se responde con voz.
 - En modo `elevenlabs` la voz tarda un poco más (se sintetiza al completarse la respuesta) y el consumo de caracteres cuenta contra la cuota de ElevenLabs.
-- El gate local recorta ~300 ms del arranque de cada frase (confirmación de voz); es deliberado y configurable.
+- El gate local recorta ~160 ms del arranque de cada frase (pre-apertura en fase de confirmación); es deliberado y configurable.
 - Con `MEMORY_PROVIDER=local` en serverless (Vercel), los recuerdos no sobreviven a los redespliegues: usa Postgres en producción.
 - La recuperación de memoria por turno alimenta a las respuestas siguientes (la respuesta en curso usa el contexto de inicio de sesión y las herramientas).
 
