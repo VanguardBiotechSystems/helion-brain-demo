@@ -1,45 +1,70 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, type CSSProperties, type RefObject } from "react";
 import type { AgentStatus } from "@/lib/shared/types";
 
 /**
- * El orbe de Helion: una aurora viva contenida en una esfera, dibujada en
- * canvas 2D sin dependencias. Manchas de luz orbitando con mezcla aditiva,
- * halo exterior, brillo especular y respiración orgánica. Los niveles de
- * audio llegan por refs (sin re-renders) y el estado modula paleta,
- * energía, velocidad y tamaño.
+ * El orbe de Helion: una esfera de luz viva, sobria y contenida.
+ *
+ * Arquitectura visual en dos capas independientes:
+ * - Halo exterior: capa CSS (.orb-halo) DETRÁS del canvas — deliberado,
+ *   sutil y con transición por estado. Al ser una capa separada, es
+ *   imposible que el contenido interno "se fugue" de la esfera.
+ * - Esfera: canvas 2D con clipping real (arc + clip). Todo lo interno —
+ *   auroras, velos, núcleo — vive dentro del círculo. Pintado por capas:
+ *   base oscura → auroras de deriva orgánica → núcleo → oclusión inferior
+ *   → anillo fresnel → brillo especular → borde fino.
+ *
+ * El movimiento usa sumas de senos con frecuencias inconmensurables (nada
+ * de órbitas evidentes) y toda la energía está interpolada: Helion respira.
  */
 
 interface OrbState {
-  /** Dos tonos base (grados HSL) entre los que viven las luces. */
+  /** Dos tonos base (grados HSL) de las auroras internas. */
   hues: [number, number];
-  /** Energía base 0..1 (luminosidad/halo). */
+  /** Saturación de las luces (contenida; el error baja aún más). */
+  sat: number;
+  /** Energía base 0..1 (luminosidad interna). */
   energy: number;
   /** Velocidad del flujo interno. */
   speed: number;
-  /** Escala del orbe (apagado = pequeño y dormido). */
+  /** Escala de la esfera (apagado = más pequeña, dormida). */
   scale: number;
-  /** Amplitud del pulso respiratorio. */
+  /** Amplitud de la respiración. */
   pulse: number;
+  /** Concentración de las corrientes hacia el centro (pensando < 1). */
+  pull: number;
+  /** Intensidad del halo exterior CSS 0..1. */
+  halo: number;
 }
 
 const ORB_STATES: Record<string, OrbState> = {
-  idle: { hues: [218, 255], energy: 0.05, speed: 0.3, scale: 0.78, pulse: 0.02 },
-  requesting_mic: { hues: [212, 258], energy: 0.16, speed: 0.55, scale: 0.86, pulse: 0.08 },
-  connecting: { hues: [212, 258], energy: 0.16, speed: 0.55, scale: 0.86, pulse: 0.08 },
-  calibrating: { hues: [188, 235], energy: 0.22, speed: 0.75, scale: 0.9, pulse: 0.1 },
-  standby: { hues: [215, 268], energy: 0.13, speed: 0.45, scale: 0.92, pulse: 0.04 },
-  voice_detected: { hues: [196, 242], energy: 0.3, speed: 1.0, scale: 0.96, pulse: 0.06 },
-  listening: { hues: [186, 225], energy: 0.38, speed: 1.2, scale: 1, pulse: 0.05 },
-  thinking: { hues: [262, 300], energy: 0.4, speed: 2.1, scale: 0.97, pulse: 0.12 },
-  speaking: { hues: [278, 318], energy: 0.46, speed: 1.35, scale: 1, pulse: 0.06 },
-  reconnecting: { hues: [38, 58], energy: 0.2, speed: 0.85, scale: 0.9, pulse: 0.12 },
-  error: { hues: [8, 32], energy: 0.15, speed: 0.35, scale: 0.84, pulse: 0.05 },
+  idle: { hues: [220, 254], sat: 62, energy: 0.06, speed: 0.25, scale: 0.8, pulse: 0.015, pull: 1, halo: 0.16 },
+  requesting_mic: { hues: [214, 250], sat: 66, energy: 0.15, speed: 0.5, scale: 0.87, pulse: 0.06, pull: 0.9, halo: 0.32 },
+  connecting: { hues: [214, 250], sat: 66, energy: 0.15, speed: 0.5, scale: 0.87, pulse: 0.06, pull: 0.9, halo: 0.32 },
+  calibrating: { hues: [201, 236], sat: 64, energy: 0.2, speed: 0.6, scale: 0.9, pulse: 0.07, pull: 1, halo: 0.38 },
+  standby: { hues: [218, 260], sat: 64, energy: 0.12, speed: 0.34, scale: 0.93, pulse: 0.028, pull: 1, halo: 0.3 },
+  voice_detected: { hues: [201, 240], sat: 68, energy: 0.26, speed: 0.68, scale: 0.96, pulse: 0.04, pull: 0.75, halo: 0.46 },
+  listening: { hues: [193, 228], sat: 70, energy: 0.34, speed: 0.8, scale: 1, pulse: 0.035, pull: 0.85, halo: 0.6 },
+  thinking: { hues: [254, 284], sat: 66, energy: 0.34, speed: 1.55, scale: 0.97, pulse: 0.07, pull: 0.55, halo: 0.5 },
+  speaking: { hues: [266, 302], sat: 68, energy: 0.38, speed: 1.0, scale: 1, pulse: 0.05, pull: 0.8, halo: 0.62 },
+  reconnecting: { hues: [222, 258], sat: 60, energy: 0.15, speed: 0.65, scale: 0.9, pulse: 0.09, pull: 1, halo: 0.32 },
+  error: { hues: [18, 36], sat: 48, energy: 0.12, speed: 0.28, scale: 0.85, pulse: 0.04, pull: 1, halo: 0.26 },
 };
 
 function lerp(current: number, target: number, factor: number): number {
   return current + (target - current) * factor;
+}
+
+/**
+ * Deriva orgánica en [-1, 1]²: suma de senos con frecuencias
+ * inconmensurables — fluye, no orbita.
+ */
+function drift(t: number, seed: number): { x: number; y: number } {
+  return {
+    x: 0.55 * Math.sin(t * 0.21 + seed * 1.7) + 0.45 * Math.sin(t * 0.093 + seed * 3.13),
+    y: 0.55 * Math.cos(t * 0.17 + seed * 2.31) + 0.45 * Math.sin(t * 0.127 + seed * 4.73),
+  };
 }
 
 export default function HelionOrb({
@@ -55,7 +80,7 @@ export default function HelionOrb({
   const statusRef = useRef<AgentStatus>(status);
   statusRef.current = status;
   // Suavizado persistente entre re-ejecuciones del efecto (sin saltos).
-  const smoothRef = useRef({ energy: 0.05, scale: 0.78, hueA: 218, hueB: 255, level: 0 });
+  const smoothRef = useRef({ energy: 0.05, scale: 0.8, hueA: 220, hueB: 254, sat: 62, pull: 1, level: 0 });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -91,75 +116,68 @@ export default function HelionOrb({
       const current = statusRef.current;
       const state = ORB_STATES[current] ?? ORB_STATES.idle;
 
-      // Nivel de audio según estado (voz del usuario o del agente).
+      // Nivel de audio, siempre suavizado (nunca literal ni parpadeante).
       let targetLevel = 0;
       if (current === "listening") targetLevel = micLevelRef.current ?? 0;
-      else if (current === "voice_detected") targetLevel = (micLevelRef.current ?? 0) * 0.6;
+      else if (current === "voice_detected") targetLevel = (micLevelRef.current ?? 0) * 0.5;
       else if (current === "speaking")
-        targetLevel = Math.max(agentLevelRef.current ?? 0, 0.12 + 0.1 * Math.sin(t * 3.6));
-      smooth.level = lerp(smooth.level, Math.min(1, targetLevel), 0.2);
+        targetLevel = Math.max(agentLevelRef.current ?? 0, 0.1 + 0.08 * Math.sin(t * 3.1));
+      smooth.level = lerp(smooth.level, Math.min(1, targetLevel), 0.12);
       const level = smooth.level;
 
-      const breathe = state.pulse * Math.sin(t * (current === "thinking" ? 3.4 : 1.7));
-      smooth.energy = lerp(smooth.energy, Math.min(1, state.energy + level * 0.55 + breathe), 0.08);
-      smooth.scale = lerp(smooth.scale, state.scale, 0.06);
-      smooth.hueA = lerp(smooth.hueA, state.hues[0], 0.05);
-      smooth.hueB = lerp(smooth.hueB, state.hues[1], 0.05);
-      const { energy, scale, hueA, hueB } = smooth;
+      const breathe = state.pulse * Math.sin(t * (current === "thinking" ? 2.9 : 1.4));
+      smooth.energy = lerp(smooth.energy, Math.min(1, state.energy + level * 0.4 + breathe), 0.06);
+      smooth.scale = lerp(smooth.scale, state.scale, 0.05);
+      smooth.hueA = lerp(smooth.hueA, state.hues[0], 0.04);
+      smooth.hueB = lerp(smooth.hueB, state.hues[1], 0.04);
+      smooth.sat = lerp(smooth.sat, state.sat, 0.05);
+      smooth.pull = lerp(smooth.pull, state.pull, 0.05);
+      const { energy, scale, hueA, hueB, sat, pull } = smooth;
 
       const cx = size / 2;
       const cy = size / 2;
-      const radius = size * 0.34 * scale * (1 + level * 0.04);
+      // La esfera casi llena el canvas: el halo vive en su propia capa CSS.
+      const radius = size * 0.46 * scale;
 
-      // Halo exterior.
-      const haloRadius = radius * (1.45 + energy * 0.8);
-      const halo = context.createRadialGradient(cx, cy, radius * 0.6, cx, cy, haloRadius);
-      halo.addColorStop(0, `hsla(${hueA}, 90%, 62%, ${0.1 + energy * 0.22})`);
-      halo.addColorStop(1, "hsla(0, 0%, 0%, 0)");
-      context.fillStyle = halo;
-      context.beginPath();
-      context.arc(cx, cy, haloRadius, 0, Math.PI * 2);
-      context.fill();
-
-      // Esfera base: profundidad oscura.
-      const base = context.createRadialGradient(
-        cx - radius * 0.25,
-        cy - radius * 0.3,
-        radius * 0.1,
-        cx,
-        cy,
-        radius,
-      );
-      base.addColorStop(0, "hsla(228, 45%, 16%, 1)");
-      base.addColorStop(0.7, "hsla(232, 50%, 8%, 1)");
-      base.addColorStop(1, "hsla(235, 55%, 4%, 1)");
-      context.fillStyle = base;
-      context.beginPath();
-      context.arc(cx, cy, radius, 0, Math.PI * 2);
-      context.fill();
-
-      // Aurora interior: manchas de luz orbitando con mezcla aditiva.
+      // ── Interior de la esfera (todo bajo clipping real) ──────────────
       context.save();
       context.beginPath();
       context.arc(cx, cy, radius, 0, Math.PI * 2);
       context.clip();
-      context.globalCompositeOperation = "lighter";
 
+      // 1) Base: vidrio oscuro con profundidad (más luz arriba-centro).
+      const base = context.createRadialGradient(
+        cx,
+        cy - radius * 0.22,
+        radius * 0.08,
+        cx,
+        cy,
+        radius * 1.02,
+      );
+      base.addColorStop(0, "hsl(225, 42%, 13%)");
+      base.addColorStop(0.55, "hsl(228, 48%, 7.5%)");
+      base.addColorStop(1, "hsl(231, 52%, 4%)");
+      context.fillStyle = base;
+      context.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+
+      // 2) Auroras: cinco masas de luz con deriva orgánica, alpha bajo.
+      context.globalCompositeOperation = "lighter";
       const speed = state.speed;
-      for (let i = 0; i < 4; i++) {
-        const phase = (i * Math.PI) / 2;
-        const wander = Math.sin(t * 0.6 * speed + i * 1.7);
-        const angle = t * speed * (0.35 + i * 0.13) + phase;
-        const dist = radius * (0.22 + 0.16 * wander + level * 0.12);
-        const bx = cx + Math.cos(angle) * dist;
-        const by = cy + Math.sin(angle * 0.9) * dist;
-        const blobRadius = radius * (0.5 + 0.16 * Math.sin(t * 0.8 * speed + i * 2.3));
-        const hue = (i % 2 === 0 ? hueA : hueB) + 14 * Math.sin(t * 0.5 + i);
-        const alpha = 0.16 + energy * 0.4;
+      for (let i = 0; i < 5; i++) {
+        const d = drift(t * speed, i + 1);
+        // Alcances distintos por luz: unas viven cerca del centro y otras
+        // se separan hacia el borde — aurora, no un foco único.
+        const reach = radius * (0.24 + 0.14 * i * 0.25 + 0.1 * (i % 3)) * pull;
+        const bx = cx + d.x * reach;
+        const by = cy + d.y * reach * 0.85 + radius * 0.05;
+        const blobRadius = radius * (0.42 + 0.14 * Math.sin(t * 0.11 * speed + i * 2.09) + i * 0.03);
+        const hue = (i % 2 === 0 ? hueA : hueB) + 10 * Math.sin(t * 0.07 + i * 1.31);
+        const alpha = 0.05 + energy * 0.15;
 
         const blob = context.createRadialGradient(bx, by, 0, bx, by, blobRadius);
-        blob.addColorStop(0, `hsla(${hue}, 88%, 64%, ${alpha})`);
-        blob.addColorStop(0.6, `hsla(${hue + 18}, 85%, 55%, ${alpha * 0.4})`);
+        blob.addColorStop(0, `hsla(${hue}, ${sat}%, 60%, ${alpha})`);
+        blob.addColorStop(0.4, `hsla(${hue + 8}, ${sat - 4}%, 55%, ${alpha * 0.55})`);
+        blob.addColorStop(0.72, `hsla(${hue + 14}, ${sat - 8}%, 48%, ${alpha * 0.22})`);
         blob.addColorStop(1, "hsla(0, 0%, 0%, 0)");
         context.fillStyle = blob;
         context.beginPath();
@@ -167,38 +185,64 @@ export default function HelionOrb({
         context.fill();
       }
 
-      // Núcleo luminoso tenue.
-      const core = context.createRadialGradient(cx, cy, 0, cx, cy, radius * 0.55);
-      core.addColorStop(0, `hsla(0, 0%, 100%, ${0.05 + energy * 0.16})`);
+      // 3) Núcleo lechoso, apenas presente.
+      const core = context.createRadialGradient(cx, cy, 0, cx, cy, radius * 0.5);
+      core.addColorStop(0, `hsla(210, 30%, 92%, ${0.02 + energy * 0.07})`);
       core.addColorStop(1, "hsla(0, 0%, 100%, 0)");
       context.fillStyle = core;
       context.beginPath();
-      context.arc(cx, cy, radius * 0.55, 0, Math.PI * 2);
+      context.arc(cx, cy, radius * 0.5, 0, Math.PI * 2);
       context.fill();
 
-      context.restore();
+      context.globalCompositeOperation = "source-over";
 
-      // Brillo especular arriba-izquierda (sensación de esfera pulida).
-      const spec = context.createRadialGradient(
-        cx - radius * 0.4,
-        cy - radius * 0.48,
-        0,
-        cx - radius * 0.4,
-        cy - radius * 0.48,
-        radius * 0.5,
+      // 4) Oclusión inferior: da volumen (la luz vive arriba).
+      const occlusion = context.createRadialGradient(
+        cx,
+        cy + radius * 0.95,
+        radius * 0.1,
+        cx,
+        cy + radius * 0.95,
+        radius * 1.5,
       );
-      spec.addColorStop(0, "hsla(0, 0%, 100%, 0.14)");
+      occlusion.addColorStop(0, "hsla(230, 55%, 3%, 0.5)");
+      occlusion.addColorStop(0.6, "hsla(230, 55%, 3%, 0.18)");
+      occlusion.addColorStop(1, "hsla(230, 55%, 3%, 0)");
+      context.fillStyle = occlusion;
+      context.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+
+      // 5) Anillo fresnel: la luz se acumula en el borde interno del vidrio.
+      const fresnel = context.createRadialGradient(cx, cy, radius * 0.8, cx, cy, radius);
+      fresnel.addColorStop(0, "hsla(0, 0%, 0%, 0)");
+      fresnel.addColorStop(0.72, `hsla(${hueA}, ${sat - 12}%, 72%, ${0.03 + energy * 0.08})`);
+      fresnel.addColorStop(0.95, `hsla(${hueB}, ${sat - 8}%, 68%, ${0.05 + energy * 0.11})`);
+      fresnel.addColorStop(1, `hsla(${hueA}, ${sat}%, 75%, ${0.02 + energy * 0.05})`);
+      context.fillStyle = fresnel;
+      context.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+
+      // 6) Brillo especular: casquete amplio y suave arriba — luz de vidrio,
+      // no una mancha. Se atenúa cuando la esfera duerme.
+      context.save();
+      context.translate(cx - radius * 0.1, cy - radius * 0.62);
+      context.rotate(-0.3);
+      context.scale(1, 0.42);
+      const spec = context.createRadialGradient(0, 0, 0, 0, 0, radius * 0.85);
+      spec.addColorStop(0, `hsla(218, 45%, 94%, ${0.05 + energy * 0.11})`);
+      spec.addColorStop(0.55, `hsla(218, 45%, 94%, ${0.015 + energy * 0.03})`);
       spec.addColorStop(1, "hsla(0, 0%, 100%, 0)");
       context.fillStyle = spec;
       context.beginPath();
-      context.arc(cx, cy, radius, 0, Math.PI * 2);
+      context.arc(0, 0, radius * 0.85, 0, Math.PI * 2);
       context.fill();
+      context.restore();
 
-      // Anillo fino del borde.
-      context.strokeStyle = `hsla(${hueA}, 75%, 72%, ${0.18 + energy * 0.3})`;
-      context.lineWidth = 1.2;
+      context.restore(); // fin del clipping: nada interno sale de aquí
+
+      // 7) Borde óptico: un trazo fino, casi imperceptible.
+      context.strokeStyle = `hsla(${hueA}, ${sat - 20}%, 80%, ${0.08 + energy * 0.14})`;
+      context.lineWidth = 1;
       context.beginPath();
-      context.arc(cx, cy, radius + 0.5, 0, Math.PI * 2);
+      context.arc(cx, cy, radius - 0.5, 0, Math.PI * 2);
       context.stroke();
 
       if (!reduceMotion) {
@@ -214,8 +258,16 @@ export default function HelionOrb({
     // Con reduce-motion se redibuja un frame estático por cambio de estado.
   }, [micLevelRef, agentLevelRef, status]);
 
+  const state = ORB_STATES[status] ?? ORB_STATES.idle;
+  const haloHue = (state.hues[0] + state.hues[1]) / 2;
+  const haloStyle: CSSProperties = {
+    opacity: state.halo,
+    background: `radial-gradient(closest-side, hsla(${haloHue}, ${state.sat}%, 58%, 0.22), hsla(${haloHue}, ${state.sat}%, 50%, 0.05) 55%, transparent 74%)`,
+  };
+
   return (
-    <div className="orb-wrap" data-status={status}>
+    <div className="orb-stage" data-status={status}>
+      <div className="orb-halo" style={haloStyle} aria-hidden />
       <canvas ref={canvasRef} className="orb-canvas" aria-hidden />
     </div>
   );

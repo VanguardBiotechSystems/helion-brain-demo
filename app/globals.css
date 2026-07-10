@@ -4,7 +4,7 @@
    ============================================================ */
 
 :root {
-  --bg: #05070c;
+  --bg: #05070b;
   --bg-elevated: #0b111c;
   --panel: rgba(16, 23, 38, 0.72);
   --panel-solid: #0d1422;
@@ -40,8 +40,8 @@ body {
 
 body {
   background:
-    radial-gradient(1100px 700px at 50% -12%, #0e1830 0%, rgba(14, 24, 48, 0) 60%),
-    radial-gradient(900px 600px at 85% 110%, rgba(60, 34, 100, 0.25) 0%, rgba(0, 0, 0, 0) 55%),
+    radial-gradient(1100px 700px at 50% -14%, #0b1322 0%, rgba(11, 19, 34, 0) 60%),
+    radial-gradient(1400px 900px at 50% 115%, rgba(24, 32, 58, 0.18) 0%, rgba(0, 0, 0, 0) 55%),
     var(--bg);
   color: var(--text);
   font-family:
@@ -1041,8 +1041,20 @@ button:disabled {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 26px;
+  gap: 24px;
   padding: 28px 20px;
+}
+
+/* Viñeta sutil: integra el orbe con el espacio, sin robar protagonismo. */
+.min-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(90% 70% at 50% 40%, rgba(30, 48, 90, 0.1) 0%, transparent 55%),
+    radial-gradient(130% 100% at 50% 45%, transparent 55%, rgba(2, 3, 7, 0.6) 100%);
+  pointer-events: none;
 }
 
 .min-brand {
@@ -1059,20 +1071,63 @@ button:disabled {
   user-select: none;
 }
 
-.min-shell .orb-wrap {
-  width: min(340px, 72vw);
+/* Escenario del orbe: la esfera vive en el canvas; el halo es una capa
+   CSS independiente detrás — deliberado, nunca una fuga del contenido. */
+.orb-stage {
+  position: relative;
+  width: clamp(240px, 34vw, 320px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  margin-bottom: 6px;
+}
+
+.orb-halo {
+  position: absolute;
+  inset: -26%;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(8px);
+  transition:
+    opacity 1.2s ease,
+    background 1.2s ease;
+  animation: halo-breathe 7s ease-in-out infinite;
+}
+
+.orb-stage .orb-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+@keyframes halo-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+@media (max-width: 560px) {
+  .orb-stage {
+    width: clamp(180px, 58vw, 230px);
+  }
 }
 
 .min-status {
   margin: 0;
-  min-height: 20px;
-  font-size: 13px;
-  letter-spacing: 0.22em;
-  text-indent: 0.22em;
+  min-height: 18px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
   text-transform: uppercase;
-  color: var(--text-faint);
+  color: rgba(148, 163, 184, 0.5);
   user-select: none;
-  transition: color 0.4s ease;
+  transition: color 0.6s ease;
 }
 
 .min-error {
@@ -1105,63 +1160,89 @@ button:disabled {
 .lg-button {
   position: relative;
   overflow: hidden;
-  min-width: 230px;
-  padding: 16px 42px;
+  min-width: 220px;
+  padding: 15px 40px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 55%, rgba(120, 160, 255, 0.05) 100%);
-  backdrop-filter: blur(18px) saturate(150%);
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
-  color: #eaf1fb;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  /* Vidrio oscuro: translúcido, no blanco. */
+  background: linear-gradient(
+    180deg,
+    rgba(148, 178, 224, 0.07) 0%,
+    rgba(120, 145, 190, 0.03) 42%,
+    rgba(8, 12, 22, 0.28) 100%
+  );
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  color: #dde6f2;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.015em;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
-    0 12px 44px rgba(0, 0, 0, 0.55),
-    0 0 28px rgba(88, 214, 255, 0.07);
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.04),
+    0 2px 8px rgba(0, 0, 0, 0.35),
+    0 18px 40px -18px rgba(0, 0, 0, 0.8);
   transition:
-    transform 0.16s ease,
-    box-shadow 0.3s ease,
-    background 0.3s ease,
-    border-color 0.3s ease;
+    transform 0.22s cubic-bezier(0.3, 0.7, 0.4, 1),
+    box-shadow 0.26s ease,
+    background 0.26s ease,
+    border-color 0.26s ease,
+    color 0.26s ease;
   user-select: none;
   touch-action: manipulation;
 }
 
-.lg-button::after {
+/* Reflejo superior: casquete de luz suave, no una línea. */
+.lg-button::before {
   content: "";
   position: absolute;
-  inset: -60% auto auto -60%;
-  width: 60%;
-  height: 220%;
-  transform: rotate(24deg) translateX(-120%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
-  transition: transform 0.7s ease;
+  inset: 1px 1px auto 1px;
+  height: 52%;
+  border-radius: 999px 999px 45% 45% / 999px 999px 100% 100%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0));
   pointer-events: none;
 }
 
 .lg-button:not(:disabled):hover {
   transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, 0.24);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #edf3fb;
+  background: linear-gradient(
+    180deg,
+    rgba(158, 188, 232, 0.1) 0%,
+    rgba(126, 152, 198, 0.045) 42%,
+    rgba(10, 14, 25, 0.3) 100%
+  );
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
-    0 16px 54px rgba(0, 0, 0, 0.6),
-    0 0 44px rgba(88, 214, 255, 0.16);
-}
-
-.lg-button:not(:disabled):hover::after {
-  transform: rotate(24deg) translateX(340%);
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.05),
+    0 3px 10px rgba(0, 0, 0, 0.38),
+    0 22px 48px -18px rgba(0, 0, 0, 0.85);
 }
 
 .lg-button:not(:disabled):active {
   transform: translateY(0) scale(0.985);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.35),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05),
+    0 2px 6px rgba(0, 0, 0, 0.3),
+    0 12px 28px -16px rgba(0, 0, 0, 0.7);
 }
 
 .lg-button:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
+  cursor: default;
+}
+
+.lg-button:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.35),
+    0 0 0 2px rgba(120, 180, 255, 0.35),
+    0 18px 40px -18px rgba(0, 0, 0, 0.8);
 }
 
 .lg-ptt {
@@ -1169,18 +1250,20 @@ button:disabled {
 }
 
 .lg-ptt-active {
-  border-color: rgba(88, 214, 255, 0.55);
+  border-color: rgba(140, 195, 255, 0.35);
+  color: #f2f7fd;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    0 0 0 2px rgba(88, 214, 255, 0.28),
-    0 0 60px rgba(88, 214, 255, 0.35);
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 0 18px rgba(110, 170, 240, 0.12),
+    0 0 0 1.5px rgba(130, 185, 250, 0.3),
+    0 18px 40px -18px rgba(0, 0, 0, 0.8);
 }
 
 @media (max-width: 560px) {
   .lg-button {
     min-width: 200px;
-    padding: 15px 34px;
-    font-size: 15px;
+    padding: 14px 34px;
+    font-size: 14.5px;
   }
 }
 

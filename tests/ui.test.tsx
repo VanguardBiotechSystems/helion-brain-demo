@@ -2,6 +2,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import HelionApp from "@/components/HelionApp";
+import MinimalVoiceExperience from "@/components/MinimalVoiceExperience";
+import { toAppError } from "@/lib/shared/errors";
 
 beforeAll(() => {
   // jsdom no implementa matchMedia ni canvas 2D: los componentes lo toleran.
@@ -38,6 +40,69 @@ describe("experiencia pública minimalista", () => {
     fireEvent.click(statusLine!);
     fireEvent.click(statusLine!);
     expect(screen.getByText(/modo avanzado/i)).toBeTruthy();
+  });
+});
+
+describe("botón y orbe por estado", () => {
+  const levelRef = { current: 0 };
+  const noop = () => {};
+
+  function renderMinimal(overrides: Partial<Parameters<typeof MinimalVoiceExperience>[0]> = {}) {
+    return render(
+      <MinimalVoiceExperience
+        appName="Helion"
+        status="idle"
+        error={null}
+        isConnected={false}
+        listenMode="auto"
+        pttActive={false}
+        micLevelRef={levelRef}
+        agentLevelRef={levelRef}
+        onPower={noop}
+        onPttChange={noop}
+        onResumeAudio={noop}
+        onAdvanced={noop}
+        {...overrides}
+      />,
+    );
+  }
+
+  it("apagado → «Encender Helion»", () => {
+    renderMinimal();
+    expect(screen.getByRole("button", { name: "Encender Helion" })).toBeTruthy();
+  });
+
+  it("conectando → «Conectando…» y deshabilitado", () => {
+    renderMinimal({ status: "connecting" });
+    const button = screen.getByRole("button", { name: "Conectando…" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it("calibrando → «Calibrando…»", () => {
+    renderMinimal({ status: "calibrating", isConnected: true });
+    expect(screen.getByRole("button", { name: "Calibrando…" })).toBeTruthy();
+  });
+
+  it("encendido → «Apagar Helion»", () => {
+    renderMinimal({ status: "listening", isConnected: true });
+    expect(screen.getByRole("button", { name: "Apagar Helion" })).toBeTruthy();
+  });
+
+  it("push-to-talk → «Mantén para hablar» + apagado discreto", () => {
+    renderMinimal({ status: "standby", isConnected: true, listenMode: "ptt" });
+    expect(screen.getByRole("button", { name: "Mantén para hablar" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /apagar helion/i })).toBeTruthy();
+  });
+
+  it("el orbe recibe el estado (data-status)", () => {
+    const { container } = renderMinimal({ status: "listening", isConnected: true });
+    expect(container.querySelector(".orb-stage")?.getAttribute("data-status")).toBe("listening");
+    expect(container.querySelector(".orb-halo")).not.toBeNull();
+  });
+
+  it("micro denegado → mensaje mínimo y elegante", () => {
+    renderMinimal({ status: "error", error: toAppError("mic_permission") });
+    expect(screen.getByText("Activa el micrófono para hablar con Helion.")).toBeTruthy();
   });
 });
 

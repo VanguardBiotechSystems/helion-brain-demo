@@ -74,14 +74,15 @@ export default function MinimalVoiceExperience({
         ? `Apagar ${appName}`
         : `Encender ${appName}`;
 
-  const statusText =
-    status === "idle"
-      ? ""
-      : status === "error"
-        ? ""
-        : showPtt && !pttActive
-          ? "Pulsa y mantén para hablar"
-          : statusLabel(status).replace("…", "");
+  // Durante los estados transitorios el botón ya lleva el texto
+  // («Conectando…», «Calibrando…»): la línea de estado calla para no duplicar.
+  const buttonCarriesStatus =
+    busy || status === "calibrating" || status === "idle" || status === "error";
+  const statusText = buttonCarriesStatus
+    ? ""
+    : showPtt && !pttActive
+      ? "Pulsa y mantén para hablar"
+      : statusLabel(status).replace("…", "");
 
   return (
     <div className="min-shell">
