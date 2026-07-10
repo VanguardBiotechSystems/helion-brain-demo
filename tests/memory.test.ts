@@ -59,6 +59,14 @@ describe("redaction — nunca guardar secretos", () => {
     expect(containsSecret("Juanma prefiere una voz juvenil española")).toBe(false);
     expect(containsSecret("mañana hay demo con el creador del robot")).toBe(false);
   });
+
+  it("no bloquea URLs largas legítimas", () => {
+    expect(
+      containsSecret(
+        "la documentación está en https://developers.openai.com/api/docs/guides/realtime/conversaciones/avanzado",
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("scoring y ranking", () => {

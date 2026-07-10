@@ -291,9 +291,19 @@ button:disabled {
 
 .status-badge[data-status="reconnecting"] .status-dot,
 .status-badge[data-status="connecting"] .status-dot,
-.status-badge[data-status="requesting_mic"] .status-dot {
+.status-badge[data-status="requesting_mic"] .status-dot,
+.status-badge[data-status="calibrating"] .status-dot {
   background: var(--amber);
   animation: pulse 0.8s ease-in-out infinite;
+}
+
+.status-badge[data-status="standby"] .status-dot {
+  background: var(--accent-deep);
+}
+
+.status-badge[data-status="voice_detected"] .status-dot {
+  background: var(--accent);
+  animation: pulse 0.6s ease-in-out infinite;
 }
 
 .status-badge[data-status="error"] .status-dot {
@@ -381,6 +391,18 @@ button:disabled {
 
 .status-label[data-status="listening"] {
   color: var(--accent);
+}
+
+.status-label[data-status="standby"] {
+  color: var(--text-dim);
+}
+
+.status-label[data-status="voice_detected"] {
+  color: var(--accent-deep);
+}
+
+.status-label[data-status="calibrating"] {
+  color: var(--amber);
 }
 
 .status-label[data-status="thinking"] {

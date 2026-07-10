@@ -12,7 +12,8 @@ const SECRET_PATTERNS: RegExp[] = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/, // JWT
   /\b[0-9a-f]{32,}\b/i, // hex largo (hashes/tokens)
-  /\b[A-Za-z0-9+/]{40,}={0,2}\b/, // base64 largo
+  // base64 largo SIN "/" para no bloquear URLs legítimas con rutas largas
+  /\b[A-Za-z0-9+]{40,}={0,2}\b/,
   // "password/contraseña/passcode/token/secret/api key" seguido de un valor
   /(password|passcode|contraseña|api[ _-]?key|token|secret)\s*(es|is|:|=)?\s*["']?[\w.\-]{6,}/i,
   /clave\s+(de\s+)?(api|acceso|openai|elevenlabs)\s*(es|:|=)?\s*["']?\S{6,}/i,
