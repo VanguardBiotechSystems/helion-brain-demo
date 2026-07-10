@@ -20,6 +20,7 @@ function makeItem(overrides: Partial<MemoryItem> = {}): MemoryItem {
     createdByProfileId: null,
     allowedProfileIds: [],
     type: "semantic",
+    assertionType: "unclassified",
     title: "Título",
     content: "Contenido",
     canonicalContent: "Contenido",
@@ -243,5 +244,63 @@ describe("LocalMemoryStore + createMemory (servicio)", () => {
     const events = await store.listEvents(created.item!.id);
     expect(events.length).toBeGreaterThanOrEqual(1);
     expect(events[0].action).toBe("created");
+  });
+});
+
+describe("assertionType — modelo y backfill (bloque 2)", () => {
+  it("backfill conservador: preference→opinion, system→fact, resto→unclassified", async () => {
+    const { backfillAssertionType } = await import("@/lib/server/memory/types");
+    expect(backfillAssertionType({ type: "preference", source: "conversation" })).toBe("opinion");
+    expect(backfillAssertionType({ type: "project", source: "system" })).toBe("fact");
+    expect(backfillAssertionType({ type: "semantic", source: "conversation" })).toBe("unclassified");
+    expect(backfillAssertionType({ assertionType: "instruction", type: "semantic", source: "manual" })).toBe("instruction");
+  });
+
+  it("una memoria efímera sin duración expresa caduca en ~48 h", async () => {
+    const store = new LocalMemoryStore("/dev/null/no-persist.json");
+    const result = await createMemory(store, {
+      type: "episodic",
+      assertionType: "ephemeral",
+      title: "Hoy llega tarde",
+      content: "Juanma dijo que hoy llegará tarde.",
+      source: "conversation",
+    });
+    expect(result.ok).toBe(true);
+    const ttl = Date.parse(result.item!.expiresAt!) - Date.now();
+    expect(ttl).toBeGreaterThan(47 * 3_600_000);
+    expect(ttl).toBeLessThan(49 * 3_600_000);
+  });
+
+  it("el curador valida assertionType y respeta duraciones expresas", () => {
+    const [memory] = validateCuratorOutput({
+      memories: [{
+        shouldRemember: true, memoryType: "episodic", assertionType: "ephemeral", ephemeralTtlHours: 24,
+        proposedScope: "private", title: "Tarde con Sergio", canonicalContent: "Juanma estará con Sergio esta tarde.",
+        importance: 0.7, confidence: 0.9, sensitivity: "normal", tags: [], relatedEntities: [],
+        updateCandidates: [], contradictionCandidates: [], requiresUserConfirmation: false, reason: "plan",
+      }],
+    });
+    expect(memory.assertionType).toBe("ephemeral");
+    expect(memory.ephemeralTtlHours).toBe(24);
+    const [bad] = validateCuratorOutput({
+      memories: [{
+        shouldRemember: true, memoryType: "semantic", assertionType: "dios", ephemeralTtlHours: -5,
+        proposedScope: "public", title: "x", canonicalContent: "y", importance: 0.7, confidence: 0.9,
+        sensitivity: "normal", tags: [], relatedEntities: [], updateCandidates: [],
+        contradictionCandidates: [], requiresUserConfirmation: false, reason: "",
+      }],
+    });
+    expect(bad.assertionType).toBe("unclassified");
+    expect(bad.ephemeralTtlHours).toBe(0);
+  });
+
+  it("una memoria 'pending' no aparece en el listado activo", async () => {
+    const store = new LocalMemoryStore("/dev/null/no-persist.json");
+    const created = await createMemory(store, {
+      type: "person", title: "dato", content: "dato pendiente", source: "conversation",
+    });
+    await store.update(created.item!.id, { status: "pending" });
+    const actives = await store.list({ status: "active" });
+    expect(actives.find((m) => m.id === created.item!.id)).toBeUndefined();
   });
 });

@@ -3,7 +3,7 @@ import { memoryDisabledResponse, requireAccess } from "@/lib/server/apiGuard";
 import { logError } from "@/lib/server/log";
 import { createMemory, filterMemoriesForProfile, getMemoryStore, makeEmbedder } from "@/lib/server/memory/service";
 import { detectScopeCues } from "@/lib/server/memory/permissions";
-import type { MemoryListFilter, MemorySensitivity, MemoryType } from "@/lib/server/memory/types";
+import { ASSERTION_TYPES, type MemoryAssertionType, type MemoryListFilter, type MemorySensitivity, type MemoryType } from "@/lib/server/memory/types";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
     importance?: unknown;
     source?: unknown;
     scope?: unknown;
+    assertionType?: unknown;
   } | null;
 
   const content = typeof body?.content === "string" ? body.content.trim().slice(0, 1000) : "";
@@ -68,6 +69,10 @@ export async function POST(request: NextRequest) {
   }
 
   const type = MEMORY_TYPES.includes(body?.type as MemoryType) ? (body?.type as MemoryType) : "semantic";
+  const assertionType =
+    ASSERTION_TYPES.includes(body?.assertionType as MemoryAssertionType) && body?.assertionType !== "unclassified"
+      ? (body?.assertionType as MemoryAssertionType)
+      : undefined;
   const sensitivity = SENSITIVITIES.includes(body?.sensitivity as MemorySensitivity)
     ? (body?.sensitivity as MemorySensitivity)
     : "normal";
@@ -91,6 +96,7 @@ export async function POST(request: NextRequest) {
         ownerProfileId: scope === "private" ? guard.profile.id : null,
         createdByProfileId: guard.profile.id,
         type,
+        assertionType,
         title: typeof body?.title === "string" && body.title.trim() ? body.title.trim() : content.slice(0, 80),
         content,
         importance: typeof body?.importance === "number" ? Math.min(1, Math.max(0, body.importance)) : 0.8,

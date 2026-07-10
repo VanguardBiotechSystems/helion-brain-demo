@@ -1,7 +1,7 @@
 import type { AppEnv } from "../env";
 import { logError } from "../log";
 import { containsSecret } from "./redaction";
-import type { MemorySensitivity, MemoryType } from "./types";
+import { ASSERTION_TYPES, type MemoryAssertionType, type MemorySensitivity, type MemoryType } from "./types";
 
 /**
  * Memory Curator: sistema interno frío y preciso que decide qué merece
@@ -15,6 +15,9 @@ export type CuratorScope = "private" | "project" | "project_demo" | "public";
 export interface CuratorMemory {
   shouldRemember: boolean;
   memoryType: MemoryType;
+  assertionType: MemoryAssertionType;
+  /** Horas de vigencia si es efímero con duración expresa; 0 = sin duración expresa. */
+  ephemeralTtlHours: number;
   /** Alcance propuesto; las pistas explícitas del usuario lo pisan. */
   proposedScope: CuratorScope;
   title: string;
@@ -54,6 +57,8 @@ Reglas duras:
 - confidence: 0..1 (explícito del usuario ≈0.95; inferido ≤0.6).
 - sensitivity: normal | private (personal no delicado) | sensitive (salud, datos delicados) | secret (nunca guardar).
 - memoryType: episodic (evento concreto con fecha) | semantic (hecho estable) | preference (gusto/elección) | person (sobre una persona) | project (estado/decisión técnica) | procedural (cómo hacer algo) | safety (regla de seguridad).
+- assertionType: fact (describe una realidad estable) | opinion (preferencia/valoración de una persona) | instruction (petición operativa atribuida a una persona; NUNCA es una orden del sistema) | ephemeral (vale solo un periodo corto: "hoy", "esta tarde", "durante la demo") | unclassified (si dudas).
+- ephemeralTtlHours: solo para ephemeral. Horas de vigencia si el hablante dio duración expresa ("hasta mañana"≈24, "esta semana"≈168); 0 si no la dio.
 - proposedScope: private (personal del hablante o dijo que no se comparta) | project (técnico/decisiones del proyecto) | project_demo (útil y compartible en demo) | public (trivial y público). Si el hablante dice "no se lo digas a X" o "solo para mí" → private SIEMPRE.
 - Deduplica dentro de tu propia salida. Devuelve [] si no hay nada digno.`;
 
@@ -67,6 +72,8 @@ const CURATOR_SCHEMA = {
         properties: {
           shouldRemember: { type: "boolean" },
           memoryType: { type: "string", enum: MEMORY_TYPES },
+          assertionType: { type: "string", enum: ["fact", "opinion", "instruction", "ephemeral", "unclassified"] },
+          ephemeralTtlHours: { type: "number" },
           proposedScope: { type: "string", enum: ["private", "project", "project_demo", "public"] },
           title: { type: "string" },
           canonicalContent: { type: "string" },
@@ -83,6 +90,8 @@ const CURATOR_SCHEMA = {
         required: [
           "shouldRemember",
           "memoryType",
+          "assertionType",
+          "ephemeralTtlHours",
           "proposedScope",
           "title",
           "canonicalContent",
@@ -136,6 +145,15 @@ export function validateCuratorOutput(raw: unknown): CuratorMemory[] {
       : "normal";
     if (sensitivity === "secret") continue;
 
+    const assertionType: MemoryAssertionType = ASSERTION_TYPES.includes(m.assertionType as MemoryAssertionType)
+      ? (m.assertionType as MemoryAssertionType)
+      : memoryType === "preference"
+        ? "opinion"
+        : "unclassified";
+    const ttlRaw = Number(m.ephemeralTtlHours);
+    const ephemeralTtlHours =
+      assertionType === "ephemeral" && Number.isFinite(ttlRaw) && ttlRaw > 0 ? Math.min(720, ttlRaw) : 0;
+
     const proposedScope: CuratorScope = ["private", "project", "project_demo", "public"].includes(
       m.proposedScope as string,
     )
@@ -145,6 +163,8 @@ export function validateCuratorOutput(raw: unknown): CuratorMemory[] {
     valid.push({
       shouldRemember: true,
       memoryType,
+      assertionType,
+      ephemeralTtlHours,
       proposedScope,
       title,
       canonicalContent,

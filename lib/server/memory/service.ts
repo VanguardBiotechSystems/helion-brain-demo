@@ -69,9 +69,16 @@ async function seedIfEmpty(store: MemoryStore): Promise<void> {
   logInfo("memory", `Memoria inicial insertada (${SEED_MEMORIES.length} recuerdos seed)`);
 }
 
+/** Caducidad por defecto de una afirmación efímera sin duración expresa. */
+export const EPHEMERAL_DEFAULT_TTL_MS = 48 * 60 * 60 * 1000;
+
 function materialize(input: NewMemoryItem): MemoryItem {
   const now = nowIso();
   const scope = input.scope ?? "project_demo";
+  const assertionType = input.assertionType ?? (input.type === "preference" ? "opinion" : "unclassified");
+  const expiresAt =
+    input.expiresAt ??
+    (assertionType === "ephemeral" ? new Date(Date.now() + EPHEMERAL_DEFAULT_TTL_MS).toISOString() : null);
   return {
     id: makeMemoryId(),
     profileId: "default",
@@ -81,6 +88,7 @@ function materialize(input: NewMemoryItem): MemoryItem {
     createdByProfileId: input.createdByProfileId ?? null,
     allowedProfileIds: input.allowedProfileIds ?? [],
     type: input.type,
+    assertionType,
     title: input.title.slice(0, 160),
     content: input.content,
     canonicalContent: (input.canonicalContent ?? input.content).slice(0, 1000),
@@ -97,7 +105,7 @@ function materialize(input: NewMemoryItem): MemoryItem {
     updatedAt: now,
     lastAccessedAt: null,
     accessCount: 0,
-    expiresAt: input.expiresAt ?? null,
+    expiresAt,
     provenance: input.provenance ?? {},
     version: 1,
   };
@@ -279,6 +287,11 @@ export async function extractAndStore(
         ownerProfileId: scope === "private" ? (profile?.id ?? null) : null,
         createdByProfileId: profile?.id ?? null,
         type: candidate.memoryType,
+        assertionType: candidate.assertionType,
+        expiresAt:
+          candidate.assertionType === "ephemeral" && candidate.ephemeralTtlHours > 0
+            ? new Date(Date.now() + candidate.ephemeralTtlHours * 3_600_000).toISOString()
+            : undefined,
         title: candidate.title,
         content: candidate.canonicalContent,
         canonicalContent: candidate.canonicalContent,

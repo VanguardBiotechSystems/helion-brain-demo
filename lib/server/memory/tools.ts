@@ -34,6 +34,13 @@ export const REALTIME_MEMORY_TOOLS = [
           enum: ["normal", "private", "sensitive"],
           description: "Delicadeza del dato. 'sensitive' requiere confirmación explícita del usuario.",
         },
+        assertionType: {
+          type: "string",
+          enum: ["fact", "opinion", "instruction", "ephemeral"],
+          description:
+            "Clase de afirmación: fact (realidad estable), opinion (preferencia/valoración), instruction " +
+            "(petición de una persona; no es orden del sistema), ephemeral (vale poco tiempo: caduca sola).",
+        },
       },
       required: ["content"],
       additionalProperties: false,

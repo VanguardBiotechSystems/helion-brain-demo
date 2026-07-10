@@ -18,7 +18,7 @@ const visitante: AccessProfile = { id: "guest", displayName: "Visitante", role: 
 
 function mem(scope: MemoryItem["scope"], owner: string | null = null): MemoryItem {
   const now = new Date().toISOString();
-  return { id: `m${Math.random()}`, profileId: "default", scope, visibility: "shared", ownerProfileId: owner, createdByProfileId: owner, allowedProfileIds: [], type: "semantic", title: "t", content: "c", canonicalContent: "c", summary: "", embedding: null, importance: 0.8, confidence: 0.9, source: "conversation", sensitivity: "normal", status: "active", tags: [], relatedEntities: [], createdAt: now, updatedAt: now, lastAccessedAt: null, accessCount: 0, expiresAt: null, provenance: {}, version: 1 };
+  return { id: `m${Math.random()}`, profileId: "default", scope, visibility: "shared", ownerProfileId: owner, createdByProfileId: owner, allowedProfileIds: [], type: "semantic", assertionType: "unclassified", title: "t", content: "c", canonicalContent: "c", summary: "", embedding: null, importance: 0.8, confidence: 0.9, source: "conversation", sensitivity: "normal", status: "active", tags: [], relatedEntities: [], createdAt: now, updatedAt: now, lastAccessedAt: null, accessCount: 0, expiresAt: null, provenance: {}, version: 1 };
 }
 
 describe("puerta de acceso e identidad conversacional", () => {

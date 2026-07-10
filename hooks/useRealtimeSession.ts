@@ -787,6 +787,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
               content: args.content,
               type: args.type,
               sensitivity: args.sensitivity,
+              assertionType: args.assertionType,
             }),
           });
           const body = (await response.json().catch(() => null)) as {

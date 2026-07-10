@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS memory_items (
   importance REAL NOT NULL DEFAULT 0.5,
   confidence REAL NOT NULL DEFAULT 0.5,
   source TEXT NOT NULL,
+  assertion_type TEXT NOT NULL DEFAULT 'unclassified',
   sensitivity TEXT NOT NULL DEFAULT 'normal',
   status TEXT NOT NULL DEFAULT 'active',
   tags JSONB NOT NULL DEFAULT '[]',
@@ -83,6 +84,7 @@ interface MemoryRow {
   importance: number;
   confidence: number;
   source: MemoryItem["source"];
+  assertion_type: MemoryItem["assertionType"] | null;
   sensitivity: MemoryItem["sensitivity"];
   status: MemoryItem["status"];
   tags: string[];
@@ -116,6 +118,7 @@ function rowToItem(row: MemoryRow): MemoryItem {
     importance: row.importance,
     confidence: row.confidence,
     source: row.source,
+    assertionType: row.assertion_type ?? "unclassified",
     sensitivity: row.sensitivity,
     status: row.status,
     tags: row.tags ?? [],
@@ -151,6 +154,7 @@ export class PostgresMemoryStore implements MemoryStore {
       ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS owner_profile_id TEXT;
       ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS created_by_profile_id TEXT;
       ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS allowed_profile_ids JSONB NOT NULL DEFAULT '[]';
+      ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS assertion_type TEXT;
       UPDATE memory_items SET
         scope = CASE
           WHEN source = 'system' AND type = 'safety' THEN 'safety'
@@ -165,6 +169,13 @@ export class PostgresMemoryStore implements MemoryStore {
         owner_profile_id = CASE WHEN source = 'system' THEN NULL ELSE 'juanma' END,
         created_by_profile_id = CASE WHEN source = 'system' THEN 'system' ELSE 'juanma' END
       WHERE scope IS NULL;
+      -- Backfill conservador (reversible: basta poner assertion_type a NULL):
+      -- preference → opinion, seeds del sistema → fact, resto → unclassified.
+      UPDATE memory_items SET assertion_type = CASE
+        WHEN type = 'preference' THEN 'opinion'
+        WHEN source = 'system' THEN 'fact'
+        ELSE 'unclassified'
+      END WHERE assertion_type IS NULL;
     `);
     await this.pool.query(
       `INSERT INTO memory_profiles (id, display_name, role)
@@ -190,8 +201,8 @@ export class PostgresMemoryStore implements MemoryStore {
         id, profile_id, type, title, content, canonical_content, summary, embedding,
         importance, confidence, source, sensitivity, status, tags, related_entities,
         created_at, updated_at, last_accessed_at, access_count, expires_at, provenance, version,
-        scope, visibility, owner_profile_id, created_by_profile_id, allowed_profile_ids
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
+        scope, visibility, owner_profile_id, created_by_profile_id, allowed_profile_ids, assertion_type
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
       [
         item.id,
         item.profileId,
@@ -220,6 +231,7 @@ export class PostgresMemoryStore implements MemoryStore {
         item.ownerProfileId,
         item.createdByProfileId,
         JSON.stringify(item.allowedProfileIds),
+        item.assertionType,
       ],
     );
     return item;
@@ -241,7 +253,8 @@ export class PostgresMemoryStore implements MemoryStore {
         importance=$8, confidence=$9, sensitivity=$10, status=$11, tags=$12,
         related_entities=$13, updated_at=$14, last_accessed_at=$15, access_count=$16,
         expires_at=$17, provenance=$18, version=$19,
-        scope=$20, visibility=$21, owner_profile_id=$22, created_by_profile_id=$23, allowed_profile_ids=$24
+        scope=$20, visibility=$21, owner_profile_id=$22, created_by_profile_id=$23, allowed_profile_ids=$24,
+        assertion_type=$25
       WHERE id=$1`,
       [
         id,
@@ -268,6 +281,7 @@ export class PostgresMemoryStore implements MemoryStore {
         merged.ownerProfileId,
         merged.createdByProfileId,
         JSON.stringify(merged.allowedProfileIds),
+        merged.assertionType,
       ],
     );
     return merged;

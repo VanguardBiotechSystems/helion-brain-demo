@@ -10,7 +10,20 @@ export type MemoryType =
   | "safety";
 
 export type MemorySensitivity = "normal" | "private" | "sensitive" | "secret";
-export type MemoryStatus = "active" | "archived" | "deleted";
+/** "pending" = a la espera de confirmación del dueño: NUNCA entra en recuperación. */
+export type MemoryStatus = "active" | "archived" | "deleted" | "pending";
+
+/**
+ * Clase de afirmación que contiene el recuerdo. Gobierna curación, ranking
+ * y retención:
+ * - fact: describe una realidad relativamente estable (puede quedar desactualizado).
+ * - opinion: preferencia/valoración de una persona (evoluciona; nunca hecho universal).
+ * - instruction: petición atribuida a una persona. NO es una orden del sistema:
+ *   conserva procedencia y jamás pisa seguridad, permisos ni personalidad.
+ * - ephemeral: ligado a un periodo corto; lleva expiresAt (48 h por defecto).
+ * - unclassified: estado explícito para lo heredado o dudoso (backfill conservador).
+ */
+export type MemoryAssertionType = "fact" | "opinion" | "instruction" | "ephemeral" | "unclassified";
 export type MemorySource = "conversation" | "explicit_user_request" | "system" | "manual" | "inferred";
 export type MemoryActor = "system" | "user" | "admin";
 
@@ -18,6 +31,7 @@ export type MemoryRelationType =
   | "supports"
   | "contradicts"
   | "updates"
+  | "supersedes"
   | "duplicates"
   | "related_to"
   | "caused_by"
@@ -48,6 +62,7 @@ export interface MemoryItem {
   /** Perfiles adicionales autorizados explícitamente. */
   allowedProfileIds: string[];
   type: MemoryType;
+  assertionType: MemoryAssertionType;
   title: string;
   content: string;
   canonicalContent: string;
@@ -75,6 +90,7 @@ export interface NewMemoryItem {
   createdByProfileId?: string | null;
   allowedProfileIds?: string[];
   type: MemoryType;
+  assertionType?: MemoryAssertionType;
   title: string;
   content: string;
   canonicalContent?: string;
@@ -99,7 +115,17 @@ export interface MemoryRelation {
   createdAt: string;
 }
 
-export type MemoryEventAction = "created" | "updated" | "retrieved" | "archived" | "deleted" | "consolidated";
+export type MemoryEventAction =
+  | "created"
+  | "updated"
+  | "retrieved"
+  | "archived"
+  | "deleted"
+  | "consolidated"
+  | "rejected"
+  | "confirmed"
+  | "expired"
+  | "decayed";
 
 export interface MemoryEvent {
   id: string;
@@ -159,6 +185,22 @@ export function migrateLegacyScopes(item: MemoryItem, ownerProfileId: string): M
     createdByProfileId: item.source === "system" ? "system" : ownerProfileId,
     allowedProfileIds: item.allowedProfileIds ?? [],
   };
+}
+
+export const ASSERTION_TYPES: MemoryAssertionType[] = ["fact", "opinion", "instruction", "ephemeral", "unclassified"];
+
+/**
+ * Backfill conservador de assertionType para memorias anteriores a la
+ * migración: preference → opinion (semántica directa), seeds del sistema →
+ * fact (curadas a mano), y todo lo demás → "unclassified" explícito.
+ * NUNCA se clasifica masivamente como fact: unclassified se trata como
+ * no-autoritativo en ranking y retención.
+ */
+export function backfillAssertionType(item: { assertionType?: MemoryAssertionType; type: MemoryType; source: MemorySource }): MemoryAssertionType {
+  if (item.assertionType && ASSERTION_TYPES.includes(item.assertionType)) return item.assertionType;
+  if (item.type === "preference") return "opinion";
+  if (item.source === "system") return "fact";
+  return "unclassified";
 }
 
 export function makeMemoryId(): string {

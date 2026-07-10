@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { logError, logInfo } from "../log";
 import {
+  backfillAssertionType,
   migrateLegacyScopes,
   type MemoryEvent,
   type MemoryItem,
@@ -43,7 +44,8 @@ export class LocalMemoryStore implements MemoryStore {
       const raw = await readFile(this.filePath, "utf8");
       const data = JSON.parse(raw) as LocalData;
       for (const item of data.items ?? []) {
-        this.items.set(item.id, migrateLegacyScopes(item, "juanma"));
+        const migrated = migrateLegacyScopes(item, "juanma");
+        this.items.set(item.id, { ...migrated, assertionType: backfillAssertionType(migrated) });
       }
       this.relations = data.relations ?? [];
       this.events = data.events ?? [];
