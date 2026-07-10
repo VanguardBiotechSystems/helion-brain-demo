@@ -16,11 +16,13 @@ function sign(secret: string, payload: string): string {
 export function createAccessToken(
   secret: string,
   profileId: string = "guest",
+  identityStatus: string = "unknown",
   now: number = Date.now(),
   ttlMs: number = ACCESS_TTL_MS,
 ): string {
   const safeProfile = profileId.replace(/[^a-zA-Z0-9_-]/g, "");
-  const payload = `${now + ttlMs}.${randomBytes(9).toString("base64url")}.${safeProfile}`;
+  const safeStatus = identityStatus.replace(/[^a-z_]/g, "");
+  const payload = `${now + ttlMs}.${randomBytes(9).toString("base64url")}.${safeProfile}.${safeStatus}`;
   return `${payload}.${sign(secret, payload)}`;
 }
 
@@ -29,22 +31,28 @@ export function createAccessToken(
  * válido. El perfil viaja DENTRO de la firma: el cliente no puede
  * autoasignarse identidad.
  */
+export interface AccessSession {
+  profileId: string;
+  identityStatus: string;
+  expiresAt: number;
+}
+
 export function verifyAccessToken(
   secret: string,
   token: string | undefined,
   now: number = Date.now(),
-): string | null {
+): AccessSession | null {
   if (!token) return null;
   const parts = token.split(".");
-  if (parts.length !== 4) return null;
-  const [expStr, nonce, profileId, signature] = parts;
-  const expected = sign(secret, `${expStr}.${nonce}.${profileId}`);
+  if (parts.length !== 5) return null;
+  const [expStr, nonce, profileId, identityStatus, signature] = parts;
+  const expected = sign(secret, `${expStr}.${nonce}.${profileId}.${identityStatus}`);
   const a = Buffer.from(signature);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   const expiresAt = Number(expStr);
   if (!Number.isFinite(expiresAt) || expiresAt <= now) return null;
-  return profileId || "guest";
+  return { profileId: profileId || "guest", identityStatus: identityStatus || "unknown", expiresAt };
 }
 
 /** Comparación en tiempo constante (hasheando primero para igualar longitudes). */

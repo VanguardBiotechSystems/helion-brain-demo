@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, verifyAccessToken } from "./access";
 import { readEnv, type AppEnv } from "./env";
-import { getProfileById, type AccessProfile } from "./profiles";
+import { getProfileById, type AccessProfile, type IdentityStatus } from "./profiles";
 import { clientIpFrom, getLimiter } from "./rateLimit";
 
 /**
@@ -15,7 +15,7 @@ export interface GuardOptions {
 }
 
 export type GuardResult =
-  | { ok: true; env: AppEnv; token: string; profile: AccessProfile }
+  | { ok: true; env: AppEnv; token: string; profile: AccessProfile; identityStatus: IdentityStatus }
   | { ok: false; response: NextResponse };
 
 export function requireAccess(request: NextRequest, options: GuardOptions = {}): GuardResult {
@@ -36,9 +36,11 @@ export function requireAccess(request: NextRequest, options: GuardOptions = {}):
   }
 
   const token = request.cookies.get(ACCESS_COOKIE)?.value ?? "";
-  const profileId = verifyAccessToken(env.sessionSecret, token);
-  const profile = getProfileById(env.profiles, profileId);
-  if (!profileId || !profile) {
+  const session = verifyAccessToken(env.sessionSecret, token);
+  const profile = session
+    ? getProfileById(env.profiles, session.profileId, env.identity.allowDynamicProfiles)
+    : null;
+  if (!session || !profile) {
     return {
       ok: false,
       response: NextResponse.json(
@@ -63,7 +65,7 @@ export function requireAccess(request: NextRequest, options: GuardOptions = {}):
     }
   }
 
-  return { ok: true, env, token, profile };
+  return { ok: true, env, token, profile, identityStatus: (session.identityStatus as IdentityStatus) ?? "unknown" };
 }
 
 /** Respuesta estándar cuando la memoria está desactivada por configuración. */

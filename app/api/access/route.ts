@@ -5,7 +5,7 @@ import {
   createAccessToken,
   verifyAccessToken,
 } from "@/lib/server/access";
-import { getProfileById, matchProfileByPasscode } from "@/lib/server/profiles";
+import { getProfileById, matchGatePasscode } from "@/lib/server/profiles";
 import { readEnv } from "@/lib/server/env";
 import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
 import { logError, logInfo } from "@/lib/server/log";
@@ -19,15 +19,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ authenticated: false, configured: false });
   }
   const token = request.cookies.get(ACCESS_COOKIE)?.value;
-  const profileId = verifyAccessToken(env.sessionSecret, token);
-  const profile = getProfileById(env.profiles, profileId);
+  const session = verifyAccessToken(env.sessionSecret, token);
+  const profile = session ? getProfileById(env.profiles, session.profileId, env.identity.allowDynamicProfiles) : null;
   return NextResponse.json({
     authenticated: Boolean(profile),
     configured: true,
     appName: env.appName,
     agentName: env.agentName,
     profile: profile
-      ? { id: profile.id, displayName: profile.displayName, role: profile.role, canViewDebug: profile.canViewDebug }
+      ? {
+          id: profile.id,
+          displayName: profile.displayName,
+          role: profile.role,
+          identityStatus: session?.identityStatus ?? "unknown",
+          canViewDebug: profile.canViewDebug && session?.identityStatus === "confirmed",
+        }
       : null,
   });
 }
@@ -56,8 +62,7 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as { passcode?: unknown } | null;
   const passcode = typeof body?.passcode === "string" ? body.passcode : "";
 
-  const profile = matchProfileByPasscode(env.profiles, passcode);
-  if (!profile) {
+  if (!matchGatePasscode(env.gatePasscodes, passcode)) {
     logInfo("access", `Passcode incorrecto desde ip=${ip}`);
     return NextResponse.json(
       { error: { code: "passcode_incorrect", message: "Passcode incorrecto." } },
@@ -65,15 +70,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // El passcode SOLO abre la puerta: la identidad empieza sin resolver.
+  const initialStatus = env.identity.enabled && env.identity.askOnSessionStart ? "unknown" : "guest";
   const response = NextResponse.json({ ok: true });
-  response.cookies.set(ACCESS_COOKIE, createAccessToken(env.sessionSecret, profile.id), {
+  response.cookies.set(ACCESS_COOKIE, createAccessToken(env.sessionSecret, env.identity.defaultProfile, initialStatus), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: Math.floor(ACCESS_TTL_MS / 1000),
   });
-  logInfo("access", `Acceso concedido a ip=${ip} perfil=${profile.id}`);
+  logInfo("access", `Acceso concedido a ip=${ip} (identidad pendiente)`);
   return response;
 }
 

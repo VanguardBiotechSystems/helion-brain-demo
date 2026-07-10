@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { resolveProfiles, type AccessProfile } from "./profiles";
+import { gatePasscodes, resolveProfiles, type AccessProfile } from "./profiles";
 
 /**
  * Lectura y validación de variables de entorno.
@@ -91,8 +91,18 @@ export interface AppEnv {
   transcriptionLanguage: string;
   textModel: string;
   accessPassword: string;
-  /** Perfiles de acceso resueltos (Juanma/Sergio/inversor/visitante…). */
+  /** Passcodes que abren la puerta (acceso, no identidad). */
+  gatePasscodes: string[];
+  /** Perfiles CONOCIDOS por identidad conversacional. */
   profiles: AccessProfile[];
+  identity: {
+    enabled: boolean;
+    askOnSessionStart: boolean;
+    defaultProfile: string;
+    requireOwnerPin: boolean;
+    ownerPin: string;
+    allowDynamicProfiles: boolean;
+  };
   sessionSecret: string;
   agentName: string;
   appName: string;
@@ -331,14 +341,12 @@ function readHelionTuning(source: Record<string, string | undefined>): HelionTun
 export function readEnv(source: Record<string, string | undefined> = process.env): EnvResult {
   const missing: string[] = REQUIRED.filter((name) => !source[name]?.trim());
 
-  // Identidad: hace falta al menos un perfil de acceso (por JSON, por
-  // passcodes simples o por APP_ACCESS_PASSWORD legado).
+  // Puerta de entrada: al menos un passcode general.
+  const passcodes = gatePasscodes(source);
+  if (passcodes.length === 0) missing.push("APP_ACCESS_PASSWORD");
+  // Perfiles conocidos (identidad conversacional, no passcodes).
   const { profiles, error: profilesError } = resolveProfiles(source);
-  if (profilesError) {
-    missing.push(`ACCESS_PROFILES_JSON (${profilesError})`);
-  } else if (profiles.length === 0) {
-    missing.push("APP_ACCESS_PASSWORD (u OWNER_PASSCODE / ACCESS_PROFILES_JSON)");
-  }
+  if (profilesError) missing.push(`KNOWN_PROFILES_JSON (${profilesError})`);
 
   // El motor de voz externo exige sus propias credenciales: fallar pronto
   // y con nombres claros es mejor que una demo con la voz rota.
@@ -361,7 +369,7 @@ export function readEnv(source: Record<string, string | undefined> = process.env
   const openaiApiKey = source.OPENAI_API_KEY!.trim();
   const accessPassword = source.APP_ACCESS_PASSWORD?.trim() ?? "";
   // Semilla del secreto de sesión derivado: el conjunto de passcodes.
-  const secretSeed = accessPassword || profiles.map((p) => p.passcode).join("|");
+  const secretSeed = passcodes.join("|");
 
   const languageRaw = source.OPENAI_TRANSCRIPTION_LANGUAGE;
   const transcriptionLanguage =
@@ -377,7 +385,16 @@ export function readEnv(source: Record<string, string | undefined> = process.env
       transcriptionLanguage,
       textModel: source.OPENAI_TEXT_MODEL?.trim() || "gpt-4.1-mini",
       accessPassword,
+      gatePasscodes: passcodes,
       profiles,
+      identity: {
+        enabled: parseBoolean(source.IDENTITY_ENABLED, true),
+        askOnSessionStart: parseBoolean(source.IDENTITY_ASK_ON_SESSION_START, true),
+        defaultProfile: source.IDENTITY_DEFAULT_PROFILE?.trim() || "guest",
+        requireOwnerPin: parseBoolean(source.IDENTITY_REQUIRE_OWNER_PIN, true),
+        ownerPin: source.OWNER_IDENTITY_PIN?.trim() ?? "",
+        allowDynamicProfiles: parseBoolean(source.IDENTITY_ALLOW_DYNAMIC_PROFILES, true),
+      },
       sessionSecret: source.SESSION_SECRET?.trim() || deriveFallbackSecret(secretSeed),
       agentName: source.AGENT_NAME?.trim() || "Atlas",
       appName: source.NEXT_PUBLIC_APP_NAME?.trim() || "Helion",

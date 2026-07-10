@@ -10,34 +10,34 @@ const SECRET = "un-secreto-de-prueba-suficientemente-largo";
 
 describe("tokens de acceso", () => {
   it("un token recién creado es válido", () => {
-    const token = createAccessToken(SECRET, "juanma");
-    expect(verifyAccessToken(SECRET, token)).toBe("juanma");
+    const token = createAccessToken(SECRET, "juanma", "confirmed");
+    expect(verifyAccessToken(SECRET, token)).toMatchObject({ profileId: "juanma", identityStatus: "confirmed" });
   });
 
   it("rechaza tokens con firma manipulada", () => {
-    const token = createAccessToken(SECRET, "juanma");
+    const token = createAccessToken(SECRET, "juanma", "confirmed");
     const tampered = token.slice(0, -4) + "AAAA";
     expect(verifyAccessToken(SECRET, tampered)).toBeNull();
   });
 
   it("rechaza tokens con expiración manipulada", () => {
-    const token = createAccessToken(SECRET, "juanma");
-    const [, nonce, profileId, signature] = token.split(".");
-    const forged = `${Date.now() + 999999999}.${nonce}.${profileId}.${signature}`;
+    const token = createAccessToken(SECRET, "juanma", "confirmed");
+    const [, nonce, profileId, status, signature] = token.split(".");
+    const forged = `${Date.now() + 999999999}.${nonce}.${profileId}.${status}.${signature}`;
     expect(verifyAccessToken(SECRET, forged)).toBeNull();
     // Tampoco se puede cambiar el perfil sin romper la firma.
     const [exp2] = token.split(".");
-    expect(verifyAccessToken(SECRET, `${exp2}.${nonce}.sergio.${signature}`)).toBeNull();
+    expect(verifyAccessToken(SECRET, `${exp2}.${nonce}.sergio.${status}.${signature}`)).toBeNull();
   });
 
   it("rechaza tokens caducados", () => {
     const issuedAt = Date.now() - ACCESS_TTL_MS - 1000;
-    const token = createAccessToken(SECRET, "juanma", issuedAt);
+    const token = createAccessToken(SECRET, "juanma", "confirmed", issuedAt);
     expect(verifyAccessToken(SECRET, token)).toBeNull();
   });
 
   it("rechaza tokens firmados con otro secreto", () => {
-    const token = createAccessToken("otro-secreto-distinto-y-tambien-largo", "juanma");
+    const token = createAccessToken("otro-secreto-distinto-y-tambien-largo", "juanma", "confirmed");
     expect(verifyAccessToken(SECRET, token)).toBeNull();
   });
 
