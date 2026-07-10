@@ -77,7 +77,17 @@ Si suena a chatbot (introducciones, listas, "¿quieres que…?"), algo va mal: r
 | Silencio al responder | Botón «Activar audio» si aparece; revisar volumen; auriculares recomendados. |
 | Error de OpenAI | Revisar crédito y clave en el panel de Vercel; `/api/health` para confirmar config. |
 
-## 6. Modo avanzado (solo si hace falta depurar)
+## 6. Latencia de voz (modo elevenlabs)
+
+El pipeline rápido es **streaming end-to-end**: OpenAI emite texto en deltas → un chunker corta la primera unidad natural (una frase completa corta sale al instante, sin mínimos) → `/api/tts/stream` reenvía el audio chunked de ElevenLabs según se sintetiza → el navegador reproduce con MediaSource desde los primeros frames (Safari cae a cola de blobs por fragmento). Mientras suena la primera frase, las siguientes se generan en paralelo.
+
+- Métricas por respuesta en modo avanzado → 🔧 → «Latencia (última respuesta)». El número clave es **Fin de voz → primer audio sonando**. Presupuesto típico: silencio VAD 500 ms + primer delta 300-500 ms + TTS 150-300 ms ⇒ ~1-1.4 s percibido en respuestas cortas.
+- **Velocidad de habla**: `ELEVENLABS_SPEED` (1.0 neutro, 1.08 por defecto, máx 1.2). `ELEVENLABS_STYLE>0` y `USE_SPEAKER_BOOST=true` mejoran expresividad a costa de latencia.
+- **Volver a lo estable si algo falla**: `ELEVENLABS_TTS_MODE=http_full` (pipeline clásico: espera la respuesta completa; más lento pero a prueba de todo). El streaming además cae solo a ese camino si falla antes del primer byte.
+- Sobre `websocket_stream`: el WS *stream-input* de ElevenLabs exige un servidor de voz con estado (conexión viva entre peticiones), incompatible con funciones serverless (Vercel). El valor se acepta y se resuelve al streaming HTTP chunked, cuyo TTFB por fragmento es equivalente; la fase 2 natural (gateway de voz con WS caliente multi-contexto) queda descrita aquí como evolución si se despliega en un servidor persistente.
+- La memoria no toca el camino crítico: contexto de sesión con presupuesto `MEMORY_MAX_BLOCKING_MS` (200 ms), búsqueda por turno con timeout de 250 ms y extracción siempre después de responder. «¿Qué recuerdas?» sí consulta en profundidad (herramienta, lo pide el usuario).
+
+## 7. Modo avanzado (solo si hace falta depurar)
 
 - **Triple clic** en la línea de estado bajo el orbe, o añadir **`?debug=1`** a la URL.
 - Dentro: transcript con caja de texto, controles (mute, cortar voz, PTT, reiniciar), diagnóstico (gate, RMS, umbral, ruidos bloqueados, calibrar) y panel de memoria (listar/buscar/borrar recuerdos).
