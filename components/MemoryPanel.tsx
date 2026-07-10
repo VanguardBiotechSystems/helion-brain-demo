@@ -56,6 +56,7 @@ export default function MemoryPanel({
   const [message, setMessage] = useState("");
   const [searching, setSearching] = useState(false);
   const [serverDisabled, setServerDisabled] = useState(false);
+  const [health, setHealth] = useState<{ persistent?: boolean; providerEffective?: string; profile?: { displayName?: string } } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,7 +83,13 @@ export default function MemoryPanel({
   }, []);
 
   useEffect(() => {
-    if (open) void load();
+    if (open) {
+      void load();
+      fetch("/api/memory/health")
+        .then((r) => (r.ok ? r.json() : null))
+        .then(setHealth)
+        .catch(() => {});
+    }
   }, [open, load]);
 
   async function handleSearch(event: FormEvent) {
@@ -172,6 +179,12 @@ export default function MemoryPanel({
               </label>
               <span className="diag-note">
                 proveedor: <code>{provider}</code> · guardados en esta sesión: {memorySavedCount}
+                {health && (
+                  <>
+                    {" "}· perfil: <code>{health.profile?.displayName ?? "—"}</code> ·{" "}
+                    {health.persistent ? "PERSISTENTE ✓" : "⚠ NO persistente (efímera en este despliegue)"}
+                  </>
+                )}
               </span>
             </div>
 
@@ -225,6 +238,7 @@ export default function MemoryPanel({
                   <div className="mem-item-head">
                     <span className="mem-type">{TYPE_LABEL[item.type] ?? item.type}</span>
                     <span className="mem-meta">
+                      {"scope" in item && (item as { scope?: string }).scope ? `${(item as { scope?: string }).scope} · ` : ""}
                       imp. {Math.round(item.importance * 100) / 100}
                       {typeof item.score === "number" ? ` · score ${item.score}` : ""} ·{" "}
                       {new Date(item.updatedAt).toLocaleDateString("es-ES")}

@@ -24,6 +24,7 @@ interface DiagnosticsData {
 }
 
 interface ServerConfig {
+  profile?: { displayName?: string; role?: string };
   model?: string;
   voice?: string;
   agentName?: string;
@@ -142,6 +143,7 @@ export default function DiagnosticsPanel({
     value === true ? "sí" : value === false ? "no" : "desconocido";
 
   const rows: Array<[string, string]> = [
+    ["Perfil actual", config?.profile ? `${config.profile.displayName} (${config.profile.role})` : "—"],
     ["Modelo realtime", model],
     ["Motor de voz", engine],
     ["Voz", voice],
