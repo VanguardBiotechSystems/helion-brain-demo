@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, verifyAccessToken } from "@/lib/server/access";
 import { readEnv } from "@/lib/server/env";
 import { getProfileById } from "@/lib/server/profiles";
+import { resolveVoiceMode } from "@/lib/server/voiceMode";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,7 @@ export async function GET(request: NextRequest) {
     transcriptionModel: env.transcriptionModel,
     textModel: env.textModel,
     voiceEngine: env.voiceEngine,
+    voiceMode: resolveVoiceMode(env),
     elevenLabsConfigured: Boolean(env.elevenLabsApiKey && env.elevenLabsVoiceId),
     elevenLabsVoiceId: env.elevenLabsVoiceId || null,
     elevenLabsModel: env.elevenLabsModel,
