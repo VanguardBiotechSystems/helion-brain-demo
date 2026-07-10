@@ -9,6 +9,7 @@ import { SEED_MEMORIES } from "./seeds";
 import {
   makeMemoryId,
   nowIso,
+  visibilityForScope,
   type MemoryActor,
   type MemoryItem,
   type MemoryStore,
@@ -16,6 +17,17 @@ import {
   type NewMemoryItem,
   type ScoredMemory,
 } from "./types";
+import { canProfileAccessMemory, detectScopeCues, filterMemoriesForProfile } from "./permissions";
+import type { AccessProfile } from "../profiles";
+
+/** Último error de memoria (seguro, sin secretos) para /api/memory/health. */
+let lastMemoryError: { message: string; at: string } | null = null;
+export function recordMemoryError(message: string): void {
+  lastMemoryError = { message: message.slice(0, 200), at: nowIso() };
+}
+export function getLastMemoryError(): { message: string; at: string } | null {
+  return lastMemoryError;
+}
 
 /**
  * Capa de servicio de memoria: deduplicación, extracción, recuperación,
@@ -59,9 +71,15 @@ async function seedIfEmpty(store: MemoryStore): Promise<void> {
 
 function materialize(input: NewMemoryItem): MemoryItem {
   const now = nowIso();
+  const scope = input.scope ?? "project_demo";
   return {
     id: makeMemoryId(),
     profileId: "default",
+    scope,
+    visibility: visibilityForScope(scope),
+    ownerProfileId: input.ownerProfileId ?? (scope === "private" ? (input.createdByProfileId ?? null) : null),
+    createdByProfileId: input.createdByProfileId ?? null,
+    allowedProfileIds: input.allowedProfileIds ?? [],
     type: input.type,
     title: input.title.slice(0, 160),
     content: input.content,
@@ -168,6 +186,8 @@ export interface SearchOptions {
   topK?: number;
   types?: MemoryType[];
   markAccessed?: boolean;
+  /** Perfil del interlocutor: el filtrado de permisos es OBLIGATORIO aquí. */
+  profile?: AccessProfile;
 }
 
 export async function searchMemories(
@@ -176,11 +196,14 @@ export async function searchMemories(
   query: string,
   options: SearchOptions = {},
 ): Promise<ScoredMemory[]> {
-  const { topK = env.memory.retrievalTopK, types, markAccessed = true } = options;
+  const { topK = env.memory.retrievalTopK, types, markAccessed = true, profile } = options;
   const embed = makeEmbedder(env);
   const queryEmbedding = query.trim() ? await embed(query) : null;
 
   let actives = await store.list({ status: "active", limit: 1000 });
+  // El filtrado por perfil ocurre ANTES del ranking: lo no autorizado no
+  // existe para este interlocutor.
+  if (profile) actives = filterMemoriesForProfile(actives, profile);
   if (types && types.length > 0) actives = actives.filter((item) => types.includes(item.type));
 
   const ranked = rankMemories(actives, { queryText: query, queryEmbedding }, topK);
@@ -195,9 +218,14 @@ export async function searchMemories(
   return ranked;
 }
 
-/** Bloque de contexto para el inicio de sesión (sin consulta concreta). */
-export async function buildSessionMemoryContext(store: MemoryStore, env: AppEnv): Promise<string> {
-  const actives = await store.list({ status: "active", limit: 500 });
+/** Bloque de contexto para el inicio de sesión, filtrado por perfil. */
+export async function buildSessionMemoryContext(
+  store: MemoryStore,
+  env: AppEnv,
+  profile?: AccessProfile,
+): Promise<string> {
+  let actives = await store.list({ status: "active", limit: 500 });
+  if (profile) actives = filterMemoriesForProfile(actives, profile);
   const ranked = rankMemories(actives, {}, Math.max(env.memory.retrievalTopK, 10));
   const safety = actives.filter((item) => item.type === "safety");
   const selection = [...safety, ...ranked.map((scored) => scored.item)];
@@ -216,6 +244,7 @@ export async function extractAndStore(
   store: MemoryStore,
   env: AppEnv,
   messages: CuratorInputMessage[],
+  profile?: AccessProfile,
 ): Promise<ExtractionResult> {
   const result: ExtractionResult = { saved: [], skipped: 0, pendingConfirmation: [] };
   if (messages.length === 0) return result;
@@ -235,9 +264,20 @@ export async function extractAndStore(
       result.pendingConfirmation.push({ title: candidate.title, reason: candidate.reason });
       continue;
     }
+    // Alcance: las pistas explícitas del usuario ganan al curador; sin
+    // permiso de memoria de proyecto, lo compartible baja a project_demo
+    // y, si tampoco procede, a privado del hablante.
+    const cues = detectScopeCues(candidate.canonicalContent);
+    let scope = cues.scope ?? candidate.proposedScope ?? env.memory.defaultScope;
+    if ((scope === "project" || scope === "project_demo") && profile && !profile.canCreateProjectMemory) {
+      scope = "private";
+    }
     const created = await createMemory(
       store,
       {
+        scope,
+        ownerProfileId: scope === "private" ? (profile?.id ?? null) : null,
+        createdByProfileId: profile?.id ?? null,
         type: candidate.memoryType,
         title: candidate.title,
         content: candidate.canonicalContent,
@@ -245,7 +285,7 @@ export async function extractAndStore(
         importance: candidate.importance,
         confidence: candidate.confidence,
         source: "conversation",
-        sensitivity: candidate.sensitivity,
+        sensitivity: cues.confidential ? "private" : candidate.sensitivity,
         tags: candidate.tags,
         relatedEntities: candidate.relatedEntities,
         provenance: { curatorReason: candidate.reason, extractedAt: nowIso() },
@@ -278,12 +318,17 @@ export async function forgetMemories(
   env: AppEnv,
   query: string,
   actor: MemoryActor = "user",
+  profile?: AccessProfile,
 ): Promise<ForgetResult> {
-  const matches = await searchMemories(store, env, query, { topK: 5, markAccessed: false });
+  const matches = await searchMemories(store, env, query, { topK: 5, markAccessed: false, profile });
   const archived: ForgetResult["archived"] = [];
   for (const { item, score } of matches) {
     if (score < FORGET_MIN_SCORE) continue;
-    if (item.type === "safety") continue; // las reglas de seguridad no se olvidan por voz
+    if (item.type === "safety" || item.scope === "safety") continue; // las reglas de seguridad no se olvidan por voz
+    // Sin permiso de gestión, solo se olvida lo propio.
+    if (profile && !profile.canManageMemory && item.ownerProfileId !== profile.id && item.createdByProfileId !== profile.id) {
+      continue;
+    }
     await store.update(item.id, { status: "archived" });
     await store.logEvent({
       id: makeMemoryId(),
@@ -342,8 +387,70 @@ export async function consolidateMemories(store: MemoryStore): Promise<{ merged:
   return { merged };
 }
 
-export { makeEmbedder, SECRET_REJECTION_MESSAGE };
+export { makeEmbedder, SECRET_REJECTION_MESSAGE, canProfileAccessMemory, filterMemoriesForProfile };
 export type { CuratorInputMessage };
+
+export interface MemoryHealth {
+  enabled: boolean;
+  providerConfigured: string;
+  providerEffective: string;
+  databaseUrlPresent: boolean;
+  connectionOk: boolean;
+  activeMemories: number;
+  lastCreatedAt: string | null;
+  readLatencyMs: number | null;
+  serverless: boolean;
+  ephemeral: boolean;
+  persistent: boolean;
+  lastError: { message: string; at: string } | null;
+}
+
+/**
+ * Diagnóstico honesto de persistencia: si Postgres no responde o el store
+ * local no puede escribir en disco (serverless), lo dice — Helion no debe
+ * fingir que recuerda.
+ */
+export async function getMemoryHealth(env: AppEnv): Promise<MemoryHealth> {
+  const serverless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  const base: MemoryHealth = {
+    enabled: env.memory.enabled,
+    providerConfigured: env.memory.provider,
+    providerEffective: "disabled",
+    databaseUrlPresent: Boolean(env.memory.databaseUrl),
+    connectionOk: false,
+    activeMemories: 0,
+    lastCreatedAt: null,
+    readLatencyMs: null,
+    serverless,
+    ephemeral: true,
+    persistent: false,
+    lastError: getLastMemoryError(),
+  };
+  if (!env.memory.enabled) return base;
+
+  try {
+    const store = await getMemoryStore(env);
+    const start = Date.now();
+    const actives = await store.list({ status: "active", limit: 1000 });
+    base.readLatencyMs = Date.now() - start;
+    base.connectionOk = true;
+    base.providerEffective = store.provider;
+    base.activeMemories = actives.length;
+    base.lastCreatedAt = actives.reduce<string | null>(
+      (latest, item) => (!latest || item.createdAt > latest ? item.createdAt : latest),
+      null,
+    );
+    const localPersistable =
+      store instanceof LocalMemoryStore ? store.isPersistable() && !serverless : false;
+    base.persistent = store.provider === "postgres" ? true : localPersistable;
+    base.ephemeral = !base.persistent;
+  } catch (error) {
+    recordMemoryError(error instanceof Error ? error.message : "fallo desconocido de memoria");
+    base.lastError = getLastMemoryError();
+    logError("memory", "health: el almacén no responde", error);
+  }
+  return base;
+}
 
 /** Aplica retención: archiva recuerdos caducados. Se llama de forma oportunista. */
 export async function applyRetention(store: MemoryStore, env: AppEnv): Promise<void> {

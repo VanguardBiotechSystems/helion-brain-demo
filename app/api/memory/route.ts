@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { memoryDisabledResponse, requireAccess } from "@/lib/server/apiGuard";
 import { logError } from "@/lib/server/log";
-import { createMemory, getMemoryStore, makeEmbedder } from "@/lib/server/memory/service";
+import { createMemory, filterMemoriesForProfile, getMemoryStore, makeEmbedder } from "@/lib/server/memory/service";
+import { detectScopeCues } from "@/lib/server/memory/permissions";
 import type { MemoryListFilter, MemorySensitivity, MemoryType } from "@/lib/server/memory/types";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
       query: params.get("q") ?? undefined,
       limit: 200,
     };
-    const items = await store.list(filter);
+    const items = filterMemoriesForProfile(await store.list(filter), guard.profile);
     return NextResponse.json({
       provider: store.provider,
       count: items.length,
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
     tags?: unknown;
     importance?: unknown;
     source?: unknown;
+    scope?: unknown;
   } | null;
 
   const content = typeof body?.content === "string" ? body.content.trim().slice(0, 1000) : "";
@@ -72,9 +74,22 @@ export async function POST(request: NextRequest) {
 
   try {
     const store = await getMemoryStore(guard.env);
+    // Scope: pistas explícitas > scope pedido > default; sin permiso de
+    // proyecto, lo compartible baja a privado del hablante.
+    const cues = detectScopeCues(content);
+    const requested = ["private", "project", "project_demo", "public"].includes(body?.scope as string)
+      ? (body?.scope as "private" | "project" | "project_demo" | "public")
+      : null;
+    let scope = cues.scope ?? requested ?? guard.env.memory.defaultScope;
+    if ((scope === "project" || scope === "project_demo") && !guard.profile.canCreateProjectMemory) {
+      scope = "private";
+    }
     const result = await createMemory(
       store,
       {
+        scope,
+        ownerProfileId: scope === "private" ? guard.profile.id : null,
+        createdByProfileId: guard.profile.id,
         type,
         title: typeof body?.title === "string" && body.title.trim() ? body.title.trim() : content.slice(0, 80),
         content,

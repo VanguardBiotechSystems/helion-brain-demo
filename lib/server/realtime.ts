@@ -33,6 +33,10 @@ export type RealtimeSessionResult = RealtimeSessionSuccess | RealtimeSessionFail
 export interface SessionConfigExtras {
   /** Bloque de recuerdos previos para las instrucciones (puede ser ""). */
   memoryContext?: string;
+  /** Identidad del interlocutor actual (construida en servidor). */
+  identityBlock?: string;
+  /** Autoconocimiento seguro de Helion (runtime). */
+  selfKnowledgeBlock?: string;
 }
 
 export function buildRealtimeSessionConfig(
@@ -102,6 +106,8 @@ export function buildRealtimeSessionConfig(
       memoryContext: extras.memoryContext,
       fastVoice: env.helion.latencyMode === "fast",
       maxNormalSentences: env.helion.maxNormalSentences,
+      identityBlock: extras.identityBlock,
+      selfKnowledgeBlock: extras.selfKnowledgeBlock,
     }),
     output_modalities: env.voiceEngine === "elevenlabs" ? ["text"] : ["audio"],
     audio,

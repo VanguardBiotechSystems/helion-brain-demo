@@ -4,8 +4,12 @@ import type { NewMemoryItem } from "./types";
  * Memoria inicial del proyecto Helion (sin secretos). Se inserta una sola
  * vez cuando el almacén está vacío, con fuente "system".
  */
+const seedBase = { createdByProfileId: "system" as const };
+
 export const SEED_MEMORIES: NewMemoryItem[] = [
   {
+    ...seedBase,
+    scope: "project_demo",
     type: "project",
     title: "Qué es Helion",
     content: "Helion es un cerebro conversacional cloud para un robot humanoide en desarrollo.",
@@ -15,6 +19,8 @@ export const SEED_MEMORIES: NewMemoryItem[] = [
     tags: ["helion", "proyecto"],
   },
   {
+    ...seedBase,
+    scope: "safety",
     type: "safety",
     title: "Sin conexión física segura",
     content:
@@ -25,6 +31,8 @@ export const SEED_MEMORIES: NewMemoryItem[] = [
     tags: ["seguridad", "hardware"],
   },
   {
+    ...seedBase,
+    scope: "safety",
     type: "safety",
     title: "Camino obligatorio hacia el hardware",
     content:
@@ -35,6 +43,8 @@ export const SEED_MEMORIES: NewMemoryItem[] = [
     tags: ["seguridad", "robotadapter", "e-stop"],
   },
   {
+    ...seedBase,
+    scope: "safety",
     type: "safety",
     title: "Sin secretos en memoria",
     content:
@@ -45,16 +55,20 @@ export const SEED_MEMORIES: NewMemoryItem[] = [
     tags: ["seguridad", "privacidad"],
   },
   {
+    ...seedBase,
+    scope: "project_demo",
     type: "preference",
     title: "Motor de voz elegido",
     content:
-      "De momento se descarta ElevenLabs: al usuario le gusta más la voz de OpenAI, y OpenAI Realtime es el motor de voz principal.",
+      "La voz de la demo es ElevenLabs en streaming (voz española nativa); OpenAI Realtime sigue siendo los oídos y el cerebro de Helion.",
     importance: 0.85,
     confidence: 0.95,
     source: "system",
     tags: ["voz", "openai", "elevenlabs"],
   },
   {
+    ...seedBase,
+    scope: "project_demo",
     type: "project",
     title: "Forma de la demo",
     content:
@@ -65,6 +79,8 @@ export const SEED_MEMORIES: NewMemoryItem[] = [
     tags: ["demo", "despliegue"],
   },
   {
+    ...seedBase,
+    scope: "project_demo",
     type: "project",
     title: "Prioridad actual",
     content:

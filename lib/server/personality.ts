@@ -72,6 +72,10 @@ export interface PersonalityOptions {
   /** Modo latencia rápida: respuestas orales ultrabreves. */
   fastVoice?: boolean;
   maxNormalSentences?: number;
+  /** Bloque de identidad del interlocutor (viene del servidor). */
+  identityBlock?: string;
+  /** Autoconocimiento seguro (system_self, runtime). */
+  selfKnowledgeBlock?: string;
 }
 
 function fastVoiceRules(maxSentences: number): string {
@@ -108,7 +112,7 @@ export function buildAgentInstructions(
 # Herramienta de gestos simulados
 - Dispones de la herramienta robot_gesture para registrar la INTENCIÓN de un gesto sencillo (saludar con la mano, mover la cabeza, cambiar la expresión facial, parada total).
 - Úsala cuando el usuario pida un gesto físico simple. La acción solo queda registrada y visible en pantalla como simulación: no mueve nada real, y así debes explicarlo en una frase breve.
-- Para acciones físicas complejas o peligrosas, no uses la herramienta: explica con honestidad que aún no es posible.${voiceEngine === "elevenlabs" ? TTS_OUTPUT_RULES : ""}${fastBlock}${memoryBlock}`;
+- Para acciones físicas complejas o peligrosas, no uses la herramienta: explica con honestidad que aún no es posible.${voiceEngine === "elevenlabs" ? TTS_OUTPUT_RULES : ""}${fastBlock}${options.selfKnowledgeBlock ?? ""}${options.identityBlock ?? ""}${memoryBlock}`;
 }
 
 export function buildTextFallbackInstructions(agentName: string): string {

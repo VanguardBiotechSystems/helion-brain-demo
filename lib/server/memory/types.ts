@@ -25,9 +25,28 @@ export type MemoryRelationType =
   | "belongs_to_person"
   | "belongs_to_project";
 
+export type MemoryScope =
+  | "private"
+  | "project"
+  | "project_demo"
+  | "public"
+  | "system_self"
+  | "safety"
+  | "internal";
+
+export type MemoryVisibility = "private" | "shared" | "public" | "internal";
+
 export interface MemoryItem {
   id: string;
   profileId: string;
+  /** Alcance de compartición (filtrado en servidor por perfil). */
+  scope: MemoryScope;
+  visibility: MemoryVisibility;
+  /** Propietario si es privada. */
+  ownerProfileId: string | null;
+  createdByProfileId: string | null;
+  /** Perfiles adicionales autorizados explícitamente. */
+  allowedProfileIds: string[];
   type: MemoryType;
   title: string;
   content: string;
@@ -51,6 +70,10 @@ export interface MemoryItem {
 }
 
 export interface NewMemoryItem {
+  scope?: MemoryScope;
+  ownerProfileId?: string | null;
+  createdByProfileId?: string | null;
+  allowedProfileIds?: string[];
   type: MemoryType;
   title: string;
   content: string;
@@ -110,6 +133,32 @@ export interface MemoryStore {
   addRelation(relation: MemoryRelation): Promise<void>;
   logEvent(event: MemoryEvent): Promise<void>;
   listEvents(memoryId?: string, limit?: number): Promise<MemoryEvent[]>;
+}
+
+export function visibilityForScope(scope: MemoryScope): MemoryVisibility {
+  if (scope === "private") return "private";
+  if (scope === "public") return "public";
+  if (scope === "internal" || scope === "safety" || scope === "system_self") return "internal";
+  return "shared";
+}
+
+/**
+ * Migración de memorias antiguas sin scope: las seeds del sistema pasan a
+ * safety/project_demo; el resto queda PRIVADO del perfil owner hasta que
+ * alguien lo reclasifique — nunca se exponen a Sergio por accidente.
+ */
+export function migrateLegacyScopes(item: MemoryItem, ownerProfileId: string): MemoryItem {
+  if (item.scope) return item;
+  const scope: MemoryScope =
+    item.source === "system" ? (item.type === "safety" ? "safety" : "project_demo") : "private";
+  return {
+    ...item,
+    scope,
+    visibility: visibilityForScope(scope),
+    ownerProfileId: scope === "private" ? ownerProfileId : null,
+    createdByProfileId: item.source === "system" ? "system" : ownerProfileId,
+    allowedProfileIds: item.allowedProfileIds ?? [],
+  };
 }
 
 export function makeMemoryId(): string {

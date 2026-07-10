@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, verifyAccessToken } from "@/lib/server/access";
 import { readEnv } from "@/lib/server/env";
+import { getProfileById } from "@/lib/server/profiles";
 import { getTtsProvider } from "@/lib/server/tts";
 import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
 
@@ -22,7 +23,9 @@ export async function GET(request: NextRequest) {
   }
 
   const token = request.cookies.get(ACCESS_COOKIE)?.value;
-  if (!verifyAccessToken(env.sessionSecret, token)) {
+  const profileId = verifyAccessToken(env.sessionSecret, token);
+  const profile = getProfileById(env.profiles, profileId);
+  if (!profile) {
     return NextResponse.json(
       { error: { code: "not_authenticated", message: "La sesión de acceso ha caducado." } },
       { status: 401 },

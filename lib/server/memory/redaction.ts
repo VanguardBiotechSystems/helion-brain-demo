@@ -10,6 +10,7 @@ const SECRET_PATTERNS: RegExp[] = [
   /ek_[A-Za-z0-9_-]{8,}/, // tokens efímeros
   /xi-api-key/i,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /postgres(ql)?:\/\/\S+/i, // connection strings de base de datos
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/, // JWT
   /\b[0-9a-f]{32,}\b/i, // hex largo (hashes/tokens)
   // base64 largo SIN "/" para no bloquear URLs legítimas con rutas largas

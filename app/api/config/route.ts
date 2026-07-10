@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, verifyAccessToken } from "@/lib/server/access";
 import { readEnv } from "@/lib/server/env";
+import { getProfileById } from "@/lib/server/profiles";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,9 @@ export async function GET(request: NextRequest) {
   }
 
   const token = request.cookies.get(ACCESS_COOKIE)?.value;
-  if (!verifyAccessToken(env.sessionSecret, token)) {
+  const profileId = verifyAccessToken(env.sessionSecret, token);
+  const profile = getProfileById(env.profiles, profileId);
+  if (!profile) {
     return NextResponse.json(
       { error: { code: "not_authenticated", message: "La sesión de acceso ha caducado." } },
       { status: 401 },
@@ -26,6 +29,7 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({
+    profile: { id: profile.id, displayName: profile.displayName, role: profile.role, canViewDebug: profile.canViewDebug },
     appName: env.appName,
     agentName: env.agentName,
     model: env.realtimeModel,

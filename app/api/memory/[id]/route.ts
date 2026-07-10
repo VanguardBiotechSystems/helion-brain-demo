@@ -4,6 +4,7 @@ import { logError } from "@/lib/server/log";
 import { getMemoryStore } from "@/lib/server/memory/service";
 import { makeMemoryId, nowIso, type MemoryStatus } from "@/lib/server/memory/types";
 import { containsSecret, SECRET_REJECTION_MESSAGE } from "@/lib/server/memory/redaction";
+import { canProfileAccessMemory, canProfileManageMemory } from "@/lib/server/memory/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
   try {
     const store = await getMemoryStore(guard.env);
+    const existing = await store.get(id);
+    if (!existing || !canProfileAccessMemory(existing, guard.profile)) {
+      return NextResponse.json({ error: { code: "unknown", message: "Recuerdo no encontrado." } }, { status: 404 });
+    }
+    if (!canProfileManageMemory(existing, guard.profile)) {
+      return NextResponse.json({ error: { code: "unknown", message: "Sin permiso sobre este recuerdo." } }, { status: 403 });
+    }
     const updated = await store.update(id, patch);
     if (!updated) {
       return NextResponse.json({ error: { code: "unknown", message: "Recuerdo no encontrado." } }, { status: 404 });
@@ -73,6 +81,13 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   try {
     const store = await getMemoryStore(guard.env);
+    const existing = await store.get(id);
+    if (!existing || !canProfileAccessMemory(existing, guard.profile)) {
+      return NextResponse.json({ error: { code: "unknown", message: "Recuerdo no encontrado." } }, { status: 404 });
+    }
+    if (!canProfileManageMemory(existing, guard.profile)) {
+      return NextResponse.json({ error: { code: "unknown", message: "Sin permiso sobre este recuerdo." } }, { status: 403 });
+    }
     const updated = await store.update(id, { status: "deleted" });
     if (!updated) {
       return NextResponse.json({ error: { code: "unknown", message: "Recuerdo no encontrado." } }, { status: 404 });

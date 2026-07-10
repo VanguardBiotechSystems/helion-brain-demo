@@ -21,13 +21,14 @@ export async function POST(request: NextRequest) {
 
   try {
     const store = await getMemoryStore(guard.env);
-    const results = await searchMemories(store, guard.env, query, { topK });
+    const results = await searchMemories(store, guard.env, query, { topK, profile: guard.profile });
     return NextResponse.json({
       results: results.map(({ item, score }) => ({
         id: item.id,
         type: item.type,
         title: item.title,
         content: item.canonicalContent || item.content,
+        scope: item.scope,
         importance: item.importance,
         confidence: item.confidence,
         updatedAt: item.updatedAt,

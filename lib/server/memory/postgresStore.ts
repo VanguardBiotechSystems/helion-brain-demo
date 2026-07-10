@@ -100,6 +100,13 @@ function rowToItem(row: MemoryRow): MemoryItem {
   return {
     id: row.id,
     profileId: row.profile_id,
+    scope: (row as unknown as { scope?: MemoryItem["scope"] }).scope ?? "private",
+    visibility: (row as unknown as { visibility?: MemoryItem["visibility"] }).visibility ?? "private",
+    ownerProfileId: (row as unknown as { owner_profile_id?: string | null }).owner_profile_id ?? null,
+    createdByProfileId:
+      (row as unknown as { created_by_profile_id?: string | null }).created_by_profile_id ?? null,
+    allowedProfileIds:
+      (row as unknown as { allowed_profile_ids?: string[] }).allowed_profile_ids ?? [],
     type: row.type,
     title: row.title,
     content: row.content,
@@ -137,6 +144,28 @@ export class PostgresMemoryStore implements MemoryStore {
 
   async init(): Promise<void> {
     await this.pool.query(SCHEMA_SQL);
+    // Migración de scopes/identidad (idempotente).
+    await this.pool.query(`
+      ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS scope TEXT;
+      ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS visibility TEXT;
+      ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS owner_profile_id TEXT;
+      ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS created_by_profile_id TEXT;
+      ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS allowed_profile_ids JSONB NOT NULL DEFAULT '[]';
+      UPDATE memory_items SET
+        scope = CASE
+          WHEN source = 'system' AND type = 'safety' THEN 'safety'
+          WHEN source = 'system' THEN 'project_demo'
+          ELSE 'private'
+        END,
+        visibility = CASE
+          WHEN source = 'system' AND type = 'safety' THEN 'internal'
+          WHEN source = 'system' THEN 'shared'
+          ELSE 'private'
+        END,
+        owner_profile_id = CASE WHEN source = 'system' THEN NULL ELSE 'juanma' END,
+        created_by_profile_id = CASE WHEN source = 'system' THEN 'system' ELSE 'juanma' END
+      WHERE scope IS NULL;
+    `);
     await this.pool.query(
       `INSERT INTO memory_profiles (id, display_name, role)
        VALUES ('default', 'Perfil principal', 'owner')
@@ -160,8 +189,9 @@ export class PostgresMemoryStore implements MemoryStore {
       `INSERT INTO memory_items (
         id, profile_id, type, title, content, canonical_content, summary, embedding,
         importance, confidence, source, sensitivity, status, tags, related_entities,
-        created_at, updated_at, last_accessed_at, access_count, expires_at, provenance, version
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+        created_at, updated_at, last_accessed_at, access_count, expires_at, provenance, version,
+        scope, visibility, owner_profile_id, created_by_profile_id, allowed_profile_ids
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
       [
         item.id,
         item.profileId,
@@ -185,6 +215,11 @@ export class PostgresMemoryStore implements MemoryStore {
         item.expiresAt,
         JSON.stringify(item.provenance),
         item.version,
+        item.scope,
+        item.visibility,
+        item.ownerProfileId,
+        item.createdByProfileId,
+        JSON.stringify(item.allowedProfileIds),
       ],
     );
     return item;
@@ -205,7 +240,8 @@ export class PostgresMemoryStore implements MemoryStore {
         type=$2, title=$3, content=$4, canonical_content=$5, summary=$6, embedding=$7,
         importance=$8, confidence=$9, sensitivity=$10, status=$11, tags=$12,
         related_entities=$13, updated_at=$14, last_accessed_at=$15, access_count=$16,
-        expires_at=$17, provenance=$18, version=$19
+        expires_at=$17, provenance=$18, version=$19,
+        scope=$20, visibility=$21, owner_profile_id=$22, created_by_profile_id=$23, allowed_profile_ids=$24
       WHERE id=$1`,
       [
         id,
@@ -227,6 +263,11 @@ export class PostgresMemoryStore implements MemoryStore {
         merged.expiresAt,
         JSON.stringify(merged.provenance),
         merged.version,
+        merged.scope,
+        merged.visibility,
+        merged.ownerProfileId,
+        merged.createdByProfileId,
+        JSON.stringify(merged.allowedProfileIds),
       ],
     );
     return merged;

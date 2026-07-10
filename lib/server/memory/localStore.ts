@@ -1,12 +1,13 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { logError, logInfo } from "../log";
-import type {
-  MemoryEvent,
-  MemoryItem,
-  MemoryListFilter,
-  MemoryRelation,
-  MemoryStore,
+import {
+  migrateLegacyScopes,
+  type MemoryEvent,
+  type MemoryItem,
+  type MemoryListFilter,
+  type MemoryRelation,
+  type MemoryStore,
 } from "./types";
 
 /**
@@ -33,11 +34,17 @@ export class LocalMemoryStore implements MemoryStore {
 
   constructor(private readonly filePath: string) {}
 
+  isPersistable(): boolean {
+    return this.persistable;
+  }
+
   async init(): Promise<void> {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const data = JSON.parse(raw) as LocalData;
-      for (const item of data.items ?? []) this.items.set(item.id, item);
+      for (const item of data.items ?? []) {
+        this.items.set(item.id, migrateLegacyScopes(item, "juanma"));
+      }
       this.relations = data.relations ?? [];
       this.events = data.events ?? [];
       logInfo("memory", `Memoria local cargada: ${this.items.size} recuerdos (${this.filePath})`);

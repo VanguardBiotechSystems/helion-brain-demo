@@ -10,9 +10,13 @@ import type { MemorySensitivity, MemoryType } from "./types";
  * no se guarda nada.
  */
 
+export type CuratorScope = "private" | "project" | "project_demo" | "public";
+
 export interface CuratorMemory {
   shouldRemember: boolean;
   memoryType: MemoryType;
+  /** Alcance propuesto; las pistas explícitas del usuario lo pisan. */
+  proposedScope: CuratorScope;
   title: string;
   canonicalContent: string;
   importance: number;
@@ -50,6 +54,7 @@ Reglas duras:
 - confidence: 0..1 (explícito del usuario ≈0.95; inferido ≤0.6).
 - sensitivity: normal | private (personal no delicado) | sensitive (salud, datos delicados) | secret (nunca guardar).
 - memoryType: episodic (evento concreto con fecha) | semantic (hecho estable) | preference (gusto/elección) | person (sobre una persona) | project (estado/decisión técnica) | procedural (cómo hacer algo) | safety (regla de seguridad).
+- proposedScope: private (personal del hablante o dijo que no se comparta) | project (técnico/decisiones del proyecto) | project_demo (útil y compartible en demo) | public (trivial y público). Si el hablante dice "no se lo digas a X" o "solo para mí" → private SIEMPRE.
 - Deduplica dentro de tu propia salida. Devuelve [] si no hay nada digno.`;
 
 const CURATOR_SCHEMA = {
@@ -62,6 +67,7 @@ const CURATOR_SCHEMA = {
         properties: {
           shouldRemember: { type: "boolean" },
           memoryType: { type: "string", enum: MEMORY_TYPES },
+          proposedScope: { type: "string", enum: ["private", "project", "project_demo", "public"] },
           title: { type: "string" },
           canonicalContent: { type: "string" },
           importance: { type: "number" },
@@ -77,6 +83,7 @@ const CURATOR_SCHEMA = {
         required: [
           "shouldRemember",
           "memoryType",
+          "proposedScope",
           "title",
           "canonicalContent",
           "importance",
@@ -129,9 +136,16 @@ export function validateCuratorOutput(raw: unknown): CuratorMemory[] {
       : "normal";
     if (sensitivity === "secret") continue;
 
+    const proposedScope: CuratorScope = ["private", "project", "project_demo", "public"].includes(
+      m.proposedScope as string,
+    )
+      ? (m.proposedScope as CuratorScope)
+      : "project_demo";
+
     valid.push({
       shouldRemember: true,
       memoryType,
+      proposedScope,
       title,
       canonicalContent,
       importance: clamp01(m.importance),

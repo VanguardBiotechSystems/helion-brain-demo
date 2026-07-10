@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, verifyAccessToken } from "@/lib/server/access";
 import { readEnv } from "@/lib/server/env";
+import { getProfileById } from "@/lib/server/profiles";
 import { createRealtimeClientSecret } from "@/lib/server/realtime";
-import { buildSessionMemoryContext, getMemoryStore } from "@/lib/server/memory/service";
+import { buildSessionMemoryContext, getMemoryStore, getMemoryHealth } from "@/lib/server/memory/service";
+import { buildSelfKnowledgeBlock } from "@/lib/server/memory/selfKnowledge";
 import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
 import { logError } from "@/lib/server/log";
 
@@ -26,7 +28,9 @@ export async function POST(request: NextRequest) {
   }
 
   const token = request.cookies.get(ACCESS_COOKIE)?.value;
-  if (!verifyAccessToken(env.sessionSecret, token)) {
+  const profileId = verifyAccessToken(env.sessionSecret, token);
+  const profile = getProfileById(env.profiles, profileId);
+  if (!profile) {
     return NextResponse.json(
       { error: { code: "not_authenticated", message: "La sesión de acceso ha caducado." } },
       { status: 401 },
@@ -54,7 +58,7 @@ export async function POST(request: NextRequest) {
     try {
       const store = await getMemoryStore(env);
       memoryContext = await Promise.race([
-        buildSessionMemoryContext(store, env),
+        buildSessionMemoryContext(store, env, profile),
         new Promise<string>((resolve) => setTimeout(() => resolve(""), env.memory.maxBlockingMs)),
       ]);
     } catch (error) {
@@ -62,7 +66,15 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const result = await createRealtimeClientSecret(env, { memoryContext });
+  // Identidad del interlocutor y autoconocimiento: salen del SERVIDOR.
+  const identityBlock = `\n\n# Interlocutor actual\nEstás hablando con ${profile.displayName} (rol: ${profile.role}). Lo sabes por su acceso; no lo anuncies salvo que te lo pregunten ("¿quién soy?", "¿con quién hablas?").\nPRIVACIDAD: solo dispones de los recuerdos autorizados para este perfil. Los recuerdos privados de otras personas NO existen en esta conversación: jamás los menciones ni confirmes su existencia.`;
+  let selfKnowledgeBlock = "";
+  if (env.memory.selfKnowledgeEnabled) {
+    const health = await getMemoryHealth(env).catch(() => null);
+    selfKnowledgeBlock = buildSelfKnowledgeBlock(env, health?.persistent ?? false);
+  }
+
+  const result = await createRealtimeClientSecret(env, { memoryContext, identityBlock, selfKnowledgeBlock });
   if (!result.ok) {
     return NextResponse.json({ error: { code: result.code, message: result.message } }, { status: 502 });
   }
@@ -87,6 +99,7 @@ export async function POST(request: NextRequest) {
       enabled: env.memory.enabled,
       autoSave: env.memory.autoSave,
     },
+    profile: { id: profile.id, displayName: profile.displayName, role: profile.role },
     tts: {
       mode: env.elevenLabsTuning.ttsMode,
       firstChunkMinChars: env.elevenLabsTuning.firstChunkMinChars,
