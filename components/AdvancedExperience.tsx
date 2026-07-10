@@ -182,6 +182,7 @@ export default function AdvancedExperience({
           gate: realtime.gate,
           listenMode: realtime.listenMode,
           lastLatency: realtime.lastLatency,
+          sessionStats: realtime.sessionStats,
         }}
       />
 

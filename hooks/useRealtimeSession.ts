@@ -168,7 +168,7 @@ const DEFAULT_TTS_CONFIG: TtsClientConfig = {
 /** Estado de una generación TTS en streaming (modo elevenlabs). */
 interface TtsGeneration {
   responseId: string;
-  chunker: SentenceChunker;
+  chunker: SentenceChunker | null;
   stream: TtsStreamSession | null;
   streamFailed: boolean;
   cancelled: boolean;
@@ -216,6 +216,10 @@ export interface RealtimeSession {
   memorySavedCount: number;
   /** Métricas de latencia de la última generación (modo debug). */
   lastLatency: LatencyReport | null;
+  /** Resumen de sesión: turnos, % rápidas (<1.5 s), interrupciones. */
+  sessionStats: { turns: number; fastResponses: number; interruptions: number; latenciesMs: number[]; reconnects: number; fallbacks: number };
+  /** Pulso perceptivo del orbe ("te he oído" / recuerdo guardado). */
+  orbPulse: { kind: "heard" | "memory"; seq: number } | null;
   connect(): Promise<void>;
   disconnect(): void;
   restart(): Promise<void>;
@@ -251,6 +255,20 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   const [lastRecall, setLastRecall] = useState<MemorySummary[]>([]);
   const [memorySavedCount, setMemorySavedCount] = useState(0);
   const [lastLatency, setLastLatency] = useState<LatencyReport | null>(null);
+  const [sessionStats, setSessionStats] = useState({
+    turns: 0,
+    fastResponses: 0,
+    interruptions: 0,
+    latenciesMs: [] as number[],
+    reconnects: 0,
+    fallbacks: 0,
+  });
+  const [orbPulse, setOrbPulse] = useState<{ kind: "heard" | "memory"; seq: number } | null>(null);
+  const pulseSeqRef = useRef(0);
+  const firePulse = useCallback((kind: "heard" | "memory") => {
+    pulseSeqRef.current += 1;
+    setOrbPulse({ kind, seq: pulseSeqRef.current });
+  }, []);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
@@ -462,9 +480,20 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
 
   /** Publica las métricas de latencia de una generación (modo debug). */
   const publishLatency = useCallback((gen: TtsGeneration) => {
+    const play = diffMs(gen.speechEndAt, gen.firstAudioPlayAt);
+    if (gen.doneAt !== null || gen.cancelled) {
+      setSessionStats((s) => ({
+        ...s,
+        turns: s.turns + (gen.doneAt !== null && !gen.cancelled ? 1 : 0),
+        fastResponses: s.fastResponses + (play !== null && play < 1500 ? 1 : 0),
+        interruptions: s.interruptions + (gen.cancelled ? 1 : 0),
+        latenciesMs: play !== null ? [...s.latenciesMs, play] : s.latenciesMs,
+        fallbacks: s.fallbacks + (gen.fallbackUsed ? 1 : 0),
+      }));
+    }
     setLastLatency({
-      ttsMode: ttsConfigRef.current.mode,
-      transport: gen.stream?.transportMode ?? (gen.fallbackUsed ? "blob-fallback" : "—"),
+      ttsMode: engineRef.current === "openai_realtime" ? "openai_realtime" : ttsConfigRef.current.mode,
+      transport: gen.stream?.transportMode ?? (engineRef.current === "openai_realtime" ? "webrtc" : gen.fallbackUsed ? "blob-fallback" : "—"),
       speechEndToResponseCreatedMs: diffMs(gen.speechEndAt, gen.responseCreatedAt),
       speechEndToFirstTextDeltaMs: diffMs(gen.speechEndAt, gen.firstTextDeltaAt),
       firstTextDeltaToTtsSendMs: diffMs(gen.firstTextDeltaAt, gen.firstTtsSendAt),
@@ -646,7 +675,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       flushTimerRef.current = setTimeout(() => {
         flushTimerRef.current = null;
         if (ttsGenRef.current !== gen || gen.cancelled || gen.streamFailed) return;
-        const chunk = gen.chunker.timeoutFlush(performance.now());
+        const chunk = gen.chunker?.timeoutFlush(performance.now()) ?? null;
         if (chunk) sendTtsChunk(gen, chunk);
       }, ttsConfigRef.current.maxChunkWaitMs + 10);
     },
@@ -691,11 +720,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       });
       if (!response.ok) return;
       const data = (await response.json().catch(() => null)) as { saved?: unknown[] } | null;
-      if (data?.saved?.length) setMemorySavedCount((count) => count + data.saved!.length);
+      if (data?.saved?.length) { setMemorySavedCount((count) => count + data.saved!.length); firePulse("memory"); }
     } catch {
       // la memoria nunca rompe la conversación
     }
-  }, []);
+  }, [firePulse]);
 
   /** Recupera recuerdos relevantes al turno y los inyecta como contexto. */
   const maybeInjectMemories = useCallback(
@@ -769,6 +798,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
             return { saved: false, reason: body?.error?.message ?? "No se pudo guardar." };
           }
           setMemorySavedCount((count) => count + 1);
+          firePulse("memory");
           return {
             saved: true,
             title: body?.item?.title ?? "",
@@ -811,7 +841,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       }
       return { error: `Herramienta de memoria desconocida: ${name}` };
     },
-    [],
+    [firePulse],
   );
 
   // ── Herramientas (robot simulado + memoria) ───────────────────────────
@@ -918,6 +948,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
 
         case "input_audio_buffer.speech_stopped":
           speechStoppedAtRef.current = performance.now();
+          firePulse("heard"); // "te he oído": evento semántico real, <150 ms
           setStatusSafe("thinking");
           break;
 
@@ -944,9 +975,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
             if (engineRef.current === "elevenlabs" && ttsConfigRef.current.mode === "http_stream") {
               cancelGeneration();
               const cfg = ttsConfigRef.current;
+              const wantsChunker = engineRef.current === "elevenlabs";
               ttsGenRef.current = {
                 responseId: event.response.id,
-                chunker: new SentenceChunker({
+                chunker: !wantsChunker ? null : new SentenceChunker({
                   firstChunkMinChars: cfg.firstChunkMinChars,
                   chunkMinChars: cfg.chunkMinChars,
                   maxChunkWaitMs: cfg.maxChunkWaitMs,
@@ -973,8 +1005,13 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
 
         // Nombre GA y nombre beta: se aceptan ambos por compatibilidad.
         case "response.output_audio_transcript.delta":
-        case "response.audio_transcript.delta":
+        case "response.audio_transcript.delta": {
+          const gen = ttsGenRef.current;
+          if (gen && gen.firstTextDeltaAt === null && event.response_id === gen.responseId) {
+            gen.firstTextDeltaAt = performance.now();
+          }
           recordLatency();
+        }
           if (event.response_id && typeof event.delta === "string") {
             logRef.current.appendAgent(event.response_id, event.delta);
           }
@@ -1004,7 +1041,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
               const now = performance.now();
               if (gen.firstTextDeltaAt === null) gen.firstTextDeltaAt = now;
               if (!gen.streamFailed) {
-                for (const chunk of gen.chunker.push(event.delta, now)) {
+                for (const chunk of gen.chunker?.push(event.delta, now) ?? []) {
                   sendTtsChunk(gen, chunk);
                 }
                 scheduleChunkFlush(gen);
@@ -1024,10 +1061,20 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           }
           break;
 
-        case "output_audio_buffer.started":
+        case "output_audio_buffer.started": {
           recordLatency();
+          const gen = ttsGenRef.current;
+          if (gen && engineRef.current === "openai_realtime") {
+            const now = performance.now();
+            if (gen.firstAudioByteAt === null) gen.firstAudioByteAt = now;
+            if (gen.firstAudioPlayAt === null) {
+              gen.firstAudioPlayAt = now;
+              publishLatency(gen);
+            }
+          }
           setStatusSafe("speaking");
           break;
+        }
 
         case "output_audio_buffer.stopped":
         case "output_audio_buffer.cleared":
@@ -1049,6 +1096,15 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
             }
           }
           const responseId = event.response?.id;
+          if (engineRef.current === "openai_realtime" && responseId) {
+            const gen = ttsGenRef.current;
+            if (gen && gen.responseId === responseId) {
+              gen.doneAt = performance.now();
+              if (event.response?.status !== "completed") gen.cancelled = true;
+              publishLatency(gen);
+              ttsGenRef.current = null;
+            }
+          }
           if (engineRef.current === "elevenlabs" && responseId) {
             const fullText = textBufferRef.current.get(responseId) ?? "";
             textBufferRef.current.delete(responseId);
@@ -1071,7 +1127,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
                 ttsGenRef.current = null;
                 if (fullText.trim()) void playTtsAudio(fullText);
               } else {
-                const rest = gen.chunker.finalize();
+                const rest = gen.chunker?.finalize() ?? null;
                 if (rest) sendTtsChunk(gen, rest);
                 gen.stream?.endOfText();
                 publishLatency(gen);
@@ -1109,6 +1165,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     [
       cancelGeneration,
       deriveReadyStatus,
+      firePulse,
       handleFunctionCall,
       maybeExtractMemory,
       maybeInjectMemories,
@@ -1367,6 +1424,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       return;
     }
     reconnectAttemptsRef.current = attempt + 1;
+    setSessionStats((s) => ({ ...s, reconnects: s.reconnects + 1 }));
     setStatus("reconnecting");
     statusRef.current = "reconnecting";
     if (attempt === 0) logRef.current.addSystem("Conexión perdida. Reintentando…");
@@ -1588,6 +1646,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       lastRecall,
       memorySavedCount,
       lastLatency,
+      sessionStats,
+      orbPulse,
       connect,
       disconnect,
       restart,
@@ -1623,6 +1683,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       lastRecall,
       memorySavedCount,
       lastLatency,
+      sessionStats,
+      orbPulse,
       connect,
       disconnect,
       restart,

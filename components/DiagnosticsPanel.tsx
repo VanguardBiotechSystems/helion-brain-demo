@@ -21,6 +21,7 @@ interface DiagnosticsData {
   gate: { state: string; noiseFloor: number; threshold: number; blockedNoises: number; level: number };
   listenMode: ListenMode;
   lastLatency: LatencyReport | null;
+  sessionStats: { turns: number; fastResponses: number; interruptions: number; latenciesMs: number[]; reconnects: number; fallbacks: number };
 }
 
 interface ServerConfig {
@@ -37,6 +38,11 @@ interface ServerConfig {
   elevenLabsModel?: string;
   audio?: { profile?: string; noiseReduction?: string; gateEnabled?: boolean };
   memory?: { enabled?: boolean; provider?: string };
+}
+
+function percentile(sorted: number[], p: number): number | null {
+  if (sorted.length === 0) return null;
+  return sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))];
 }
 
 /**
@@ -203,6 +209,32 @@ export default function DiagnosticsPanel({
               <dd>{value}</dd>
             </div>
           ))}
+        </dl>
+
+        <h3 className="diag-subtitle">Resumen de sesión</h3>
+        <dl className="diag-grid">
+          {(() => {
+            const st = data.sessionStats;
+            const sorted = [...st.latenciesMs].sort((a, b) => a - b);
+            const pct = st.turns > 0 ? Math.round((100 * st.fastResponses) / st.turns) : null;
+            const fmt = (v: number | null) => (v !== null ? `${v} ms` : "—");
+            return (
+              [
+                ["Turnos completados", String(st.turns)],
+                ["Respuestas < 1.5 s", pct !== null ? `${st.fastResponses} (${pct}%)` : "—"],
+                ["Latencia p50 / p95 / max", `${fmt(percentile(sorted, 50))} · ${fmt(percentile(sorted, 95))} · ${fmt(sorted.length ? sorted[sorted.length - 1] : null)}`],
+                ["Interrupciones atendidas", String(st.interruptions)],
+                ["Reconexiones", String(st.reconnects)],
+                ["Ruidos bloqueados (gate)", String(data.gate.blockedNoises)],
+                ["Respuestas por fallback", String(st.fallbacks)],
+              ] as Array<[string, string]>
+            ).map(([label, value]) => (
+              <div className="diag-row" key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ));
+          })()}
         </dl>
 
         {data.lastLatency && (

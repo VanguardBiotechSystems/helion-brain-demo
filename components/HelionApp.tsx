@@ -121,6 +121,7 @@ export default function HelionApp({
       onPttChange={realtime.setPttActive}
       onResumeAudio={realtime.resumeAudio}
       onAdvanced={() => setAdvanced(true)}
+      orbPulse={realtime.orbPulse}
     />
   );
 }

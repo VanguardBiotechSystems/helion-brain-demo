@@ -3,7 +3,7 @@
 import { useRef, type RefObject } from "react";
 import type { AppError } from "@/lib/shared/errors";
 import type { AgentStatus, ListenMode } from "@/lib/shared/types";
-import HelionOrb from "./HelionOrb";
+import HelionOrb, { type OrbPulse } from "./HelionOrb";
 import { statusLabel } from "./ConnectionStatus";
 
 /**
@@ -26,6 +26,7 @@ interface MinimalVoiceExperienceProps {
   onPttChange: (active: boolean) => void;
   onResumeAudio: () => void;
   onAdvanced: () => void;
+  orbPulse?: OrbPulse | null;
 }
 
 function minimalErrorMessage(error: AppError): string {
@@ -48,6 +49,7 @@ export default function MinimalVoiceExperience({
   onPttChange,
   onResumeAudio,
   onAdvanced,
+  orbPulse = null,
 }: MinimalVoiceExperienceProps) {
   const tapsRef = useRef<number[]>([]);
 
@@ -90,7 +92,7 @@ export default function MinimalVoiceExperience({
         {appName}
       </span>
 
-      <HelionOrb status={status} micLevelRef={micLevelRef} agentLevelRef={agentLevelRef} />
+      <HelionOrb status={status} micLevelRef={micLevelRef} agentLevelRef={agentLevelRef} pulse={orbPulse} />
 
       <p
         className="min-status"

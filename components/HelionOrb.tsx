@@ -67,20 +67,33 @@ function drift(t: number, seed: number): { x: number; y: number } {
   };
 }
 
+export interface OrbPulse {
+  kind: "heard" | "memory";
+  seq: number;
+}
+
 export default function HelionOrb({
   status,
   micLevelRef,
   agentLevelRef,
+  pulse = null,
 }: {
   status: AgentStatus;
   micLevelRef: RefObject<number>;
   agentLevelRef: RefObject<number>;
+  /** Microestados perceptivos: "te he oído" (heard) y recuerdo guardado (memory). */
+  pulse?: OrbPulse | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const statusRef = useRef<AgentStatus>(status);
   statusRef.current = status;
   // Suavizado persistente entre re-ejecuciones del efecto (sin saltos).
   const smoothRef = useRef({ energy: 0.05, scale: 0.8, hueA: 220, hueB: 254, sat: 62, pull: 1, level: 0 });
+  // Pulso activo: {kind, startedAt} — se dibuja ~450 ms y se autocancela.
+  const pulseRef = useRef<{ kind: "heard" | "memory"; startedAt: number } | null>(null);
+  useEffect(() => {
+    if (pulse) pulseRef.current = { kind: pulse.kind, startedAt: performance.now() };
+  }, [pulse]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -237,6 +250,34 @@ export default function HelionOrb({
       context.restore();
 
       context.restore(); // fin del clipping: nada interno sale de aquí
+
+      // 6b) Microestados perceptivos: anillo breve de recepción ("te he
+      // oído", cian) o destello dorado de recuerdo guardado. Nace de un
+      // evento semántico real; con reduce-motion no se anima.
+      const activePulse = pulseRef.current;
+      if (activePulse && !reduceMotion) {
+        const age = (timestamp - activePulse.startedAt) / 450;
+        if (age >= 1) {
+          pulseRef.current = null;
+        } else {
+          const fade = 1 - age;
+          if (activePulse.kind === "heard") {
+            context.strokeStyle = `hsla(196, 80%, 70%, ${0.35 * fade})`;
+            context.lineWidth = 2;
+            context.beginPath();
+            context.arc(cx, cy, radius * (1.02 + age * 0.12), 0, Math.PI * 2);
+            context.stroke();
+          } else {
+            const glow = context.createRadialGradient(cx, cy, radius * 0.5, cx, cy, radius);
+            glow.addColorStop(0, `hsla(45, 85%, 62%, ${0.16 * fade})`);
+            glow.addColorStop(1, "hsla(45, 85%, 62%, 0)");
+            context.fillStyle = glow;
+            context.beginPath();
+            context.arc(cx, cy, radius, 0, Math.PI * 2);
+            context.fill();
+          }
+        }
+      }
 
       // 7) Borde óptico: un trazo fino, casi imperceptible.
       context.strokeStyle = `hsla(${hueA}, ${sat - 20}%, 80%, ${0.08 + energy * 0.14})`;
