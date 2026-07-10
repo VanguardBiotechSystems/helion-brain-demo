@@ -5,13 +5,17 @@ import { toAppError, type AppError, type ErrorCode } from "@/lib/shared/errors";
 import type {
   AgentStatus,
   ClientGateConfig,
+  LatencyReport,
   ListenMode,
   MemorySummary,
   MicSettingsInfo,
   SessionInfo,
   SessionResponse,
+  TtsClientConfig,
   VoiceEngine,
 } from "@/lib/shared/types";
+import { SentenceChunker } from "@/lib/voice/chunker";
+import { TtsStreamSession } from "@/lib/voice/streamingTts";
 import { mockRobot } from "@/lib/robot/mockAdapter";
 import type { RobotCommand } from "@/lib/robot/types";
 import {
@@ -152,6 +156,38 @@ export interface GateDiagnostics {
   level: number;
 }
 
+const DEFAULT_TTS_CONFIG: TtsClientConfig = {
+  mode: "http_stream",
+  firstChunkMinChars: 12,
+  chunkMinChars: 35,
+  maxChunkWaitMs: 80,
+  audioStartBufferMs: 50,
+};
+
+/** Estado de una generación TTS en streaming (modo elevenlabs). */
+interface TtsGeneration {
+  responseId: string;
+  chunker: SentenceChunker;
+  stream: TtsStreamSession | null;
+  streamFailed: boolean;
+  cancelled: boolean;
+  fallbackUsed: boolean;
+  hadToolCalls: boolean;
+  speechEndAt: number | null;
+  responseCreatedAt: number | null;
+  firstTextDeltaAt: number | null;
+  firstTtsSendAt: number | null;
+  firstAudioByteAt: number | null;
+  firstAudioPlayAt: number | null;
+  doneAt: number | null;
+  firstChunkChars: number | null;
+  chunksSent: number;
+}
+
+function diffMs(from: number | null, to: number | null): number | null {
+  return from !== null && to !== null ? Math.round(to - from) : null;
+}
+
 interface ExchangeMessage {
   role: "user" | "assistant";
   content: string;
@@ -177,6 +213,8 @@ export interface RealtimeSession {
   memoryActive: boolean;
   lastRecall: MemorySummary[];
   memorySavedCount: number;
+  /** Métricas de latencia de la última generación (modo debug). */
+  lastLatency: LatencyReport | null;
   connect(): Promise<void>;
   disconnect(): void;
   restart(): Promise<void>;
@@ -211,6 +249,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   const [memoryActive, setMemoryActiveState] = useState(true);
   const [lastRecall, setLastRecall] = useState<MemorySummary[]>([]);
   const [memorySavedCount, setMemorySavedCount] = useState(0);
+  const [lastLatency, setLastLatency] = useState<LatencyReport | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
@@ -239,6 +278,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   // Contador de generación: cualquier cancelación (barge-in, cortar voz,
   // reconexión) o una síntesis más nueva invalida las síntesis en vuelo.
   const ttsEpochRef = useRef(0);
+  // Generación TTS en streaming activa y su configuración de chunking.
+  const ttsGenRef = useRef<TtsGeneration | null>(null);
+  const ttsConfigRef = useRef<TtsClientConfig>(DEFAULT_TTS_CONFIG);
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Memoria: intercambios pendientes de curar y recuerdos ya inyectados.
   const memoryEnabledRef = useRef(false);
   const memoryActiveRef = useRef(true);
@@ -362,6 +405,16 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     }
     sendTrackRef.current?.stop();
     sendTrackRef.current = null;
+    // Aborta la generación TTS en streaming (fetches + reproducción).
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    if (ttsGenRef.current) {
+      ttsGenRef.current.cancelled = true;
+      ttsGenRef.current.stream?.cancel();
+      ttsGenRef.current = null;
+    }
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.srcObject = null;
@@ -403,9 +456,45 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     }
   }, []);
 
+  /** Publica las métricas de latencia de una generación (modo debug). */
+  const publishLatency = useCallback((gen: TtsGeneration) => {
+    setLastLatency({
+      ttsMode: ttsConfigRef.current.mode,
+      transport: gen.stream?.transportMode ?? (gen.fallbackUsed ? "blob-fallback" : "—"),
+      speechEndToResponseCreatedMs: diffMs(gen.speechEndAt, gen.responseCreatedAt),
+      speechEndToFirstTextDeltaMs: diffMs(gen.speechEndAt, gen.firstTextDeltaAt),
+      firstTextDeltaToTtsSendMs: diffMs(gen.firstTextDeltaAt, gen.firstTtsSendAt),
+      ttsSendToFirstAudioByteMs: diffMs(gen.firstTtsSendAt, gen.firstAudioByteAt),
+      speechEndToFirstAudioByteMs: diffMs(gen.speechEndAt, gen.firstAudioByteAt),
+      firstAudioByteToPlayMs: diffMs(gen.firstAudioByteAt, gen.firstAudioPlayAt),
+      speechEndToFirstAudioPlayMs: diffMs(gen.speechEndAt, gen.firstAudioPlayAt),
+      totalResponseDoneMs: diffMs(gen.speechEndAt, gen.doneAt),
+      firstChunkChars: gen.firstChunkChars,
+      chunksSent: gen.chunksSent,
+      fallbackUsed: gen.fallbackUsed,
+      cancelled: gen.cancelled,
+      hadToolCalls: gen.hadToolCalls,
+    });
+  }, []);
+
+  /** Cancela la generación TTS en streaming activa (barge-in, apagado…). */
+  const cancelGeneration = useCallback(() => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    const gen = ttsGenRef.current;
+    if (!gen) return;
+    gen.cancelled = true;
+    gen.stream?.cancel();
+    publishLatency(gen);
+    ttsGenRef.current = null;
+  }, [publishLatency]);
+
   /** Detiene la reproducción TTS local e invalida las síntesis en vuelo. */
   const stopTtsPlayback = useCallback(() => {
     ttsEpochRef.current += 1;
+    cancelGeneration();
     if (engineRef.current !== "elevenlabs") return;
     const element = audioRef.current;
     if (element) {
@@ -420,7 +509,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       URL.revokeObjectURL(ttsUrlRef.current);
       ttsUrlRef.current = null;
     }
-  }, []);
+  }, [cancelGeneration]);
 
   /** Modo elevenlabs: sintetiza la respuesta en servidor y la reproduce. */
   const playTtsAudio = useCallback(
@@ -489,6 +578,73 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     [deriveReadyStatus, ensureAudioElement, recordLatency, setStatusSafe],
   );
 
+  /** Envía un fragmento de texto al TTS en streaming (lo crea si hace falta). */
+  const sendTtsChunk = useCallback(
+    (gen: TtsGeneration, text: string) => {
+      if (gen.cancelled || ttsGenRef.current !== gen) return;
+      if (!gen.stream) {
+        const session = new TtsStreamSession(
+          ensureAudioElement(),
+          {
+            onFirstAudioByte: () => {
+              if (ttsGenRef.current !== gen || gen.cancelled) return;
+              gen.firstAudioByteAt = performance.now();
+            },
+            onPlaying: () => {
+              if (gen.cancelled) return;
+              gen.firstAudioPlayAt = performance.now();
+              if (gen.speechEndAt !== null) {
+                setLatencyMs(Math.round(gen.firstAudioPlayAt - gen.speechEndAt));
+              }
+              setStatusSafe("speaking");
+              publishLatency(gen);
+            },
+            onEnded: () => {
+              if (gen.cancelled) return;
+              setStatusSafe(deriveReadyStatus());
+              publishLatency(gen);
+              if (ttsGenRef.current === gen) ttsGenRef.current = null;
+            },
+            onError: (message) => {
+              if (gen.cancelled) return;
+              if (message === "autoplay_blocked") {
+                setError(toAppError("audio_playback"));
+                return;
+              }
+              // Sin audio aún: marcar para caer al pipeline completo en done.
+              if (gen.firstAudioByteAt === null) gen.streamFailed = true;
+            },
+          },
+          ttsConfigRef.current.audioStartBufferMs,
+        );
+        gen.stream = session;
+        session.begin();
+      }
+      const now = performance.now();
+      if (gen.firstTtsSendAt === null) {
+        gen.firstTtsSendAt = now;
+        gen.firstChunkChars = text.length;
+      }
+      gen.chunksSent += 1;
+      gen.stream.enqueueText(text);
+    },
+    [deriveReadyStatus, ensureAudioElement, publishLatency, setStatusSafe],
+  );
+
+  /** Reprograma el flush por inactividad del chunker. */
+  const scheduleChunkFlush = useCallback(
+    (gen: TtsGeneration) => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = setTimeout(() => {
+        flushTimerRef.current = null;
+        if (ttsGenRef.current !== gen || gen.cancelled || gen.streamFailed) return;
+        const chunk = gen.chunker.timeoutFlush(performance.now());
+        if (chunk) sendTtsChunk(gen, chunk);
+      }, ttsConfigRef.current.maxChunkWaitMs + 10);
+    },
+    [sendTtsChunk],
+  );
+
   /** Cancela la respuesta activa (generación y audio) sea cual sea el motor. */
   const cancelActiveResponse = useCallback(() => {
     sendEvent({ type: "response.cancel" });
@@ -544,6 +700,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query, topK: 4 }),
+          // Presupuesto duro: la memoria jamás retiene el camino crítico.
+          signal: requestTimeoutSignal(250),
         });
         if (!response.ok) return;
         const data = (await response.json().catch(() => null)) as { results?: MemorySummary[] } | null;
@@ -655,6 +813,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       if (!callId || processedCallsRef.current.has(callId)) return;
       processedCallsRef.current.add(callId);
 
+      if (ttsGenRef.current) ttsGenRef.current.hadToolCalls = true;
+
       let output: Record<string, unknown>;
       if (
         name === MEMORY_TOOL_NAMES.save ||
@@ -746,7 +906,37 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
 
         case "response.created":
           setStatusSafe("thinking");
-          if (event.response?.id) logRef.current.startAgent(event.response.id);
+          if (event.response?.id) {
+            logRef.current.startAgent(event.response.id);
+            // Modo elevenlabs streaming: arranca la generación TTS y las métricas.
+            if (engineRef.current === "elevenlabs" && ttsConfigRef.current.mode === "http_stream") {
+              cancelGeneration();
+              const cfg = ttsConfigRef.current;
+              ttsGenRef.current = {
+                responseId: event.response.id,
+                chunker: new SentenceChunker({
+                  firstChunkMinChars: cfg.firstChunkMinChars,
+                  chunkMinChars: cfg.chunkMinChars,
+                  maxChunkWaitMs: cfg.maxChunkWaitMs,
+                  maxChunkChars: 180,
+                }),
+                stream: null,
+                streamFailed: false,
+                cancelled: false,
+                fallbackUsed: false,
+                hadToolCalls: false,
+                speechEndAt: speechStoppedAtRef.current,
+                responseCreatedAt: performance.now(),
+                firstTextDeltaAt: null,
+                firstTtsSendAt: null,
+                firstAudioByteAt: null,
+                firstAudioPlayAt: null,
+                doneAt: null,
+                firstChunkChars: null,
+                chunksSent: 0,
+              };
+            }
+          }
           break;
 
         // Nombre GA y nombre beta: se aceptan ambos por compatibilidad.
@@ -776,6 +966,18 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
               event.response_id,
               (textBufferRef.current.get(event.response_id) ?? "") + event.delta,
             );
+            // Streaming: el texto se trocea y sintetiza según llega.
+            const gen = ttsGenRef.current;
+            if (gen && !gen.cancelled && gen.responseId === event.response_id) {
+              const now = performance.now();
+              if (gen.firstTextDeltaAt === null) gen.firstTextDeltaAt = now;
+              if (!gen.streamFailed) {
+                for (const chunk of gen.chunker.push(event.delta, now)) {
+                  sendTtsChunk(gen, chunk);
+                }
+                scheduleChunkFlush(gen);
+              }
+            }
           }
           break;
 
@@ -812,12 +1014,42 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           }
           const responseId = event.response?.id;
           if (engineRef.current === "elevenlabs" && responseId) {
-            const text = textBufferRef.current.get(responseId) ?? "";
+            const fullText = textBufferRef.current.get(responseId) ?? "";
             textBufferRef.current.delete(responseId);
-            if (event.response?.status === "completed" && text.trim()) {
-              void playTtsAudio(text);
+            const gen = ttsGenRef.current;
+
+            if (gen && gen.responseId === responseId) {
+              gen.doneAt = performance.now();
+              if (flushTimerRef.current) {
+                clearTimeout(flushTimerRef.current);
+                flushTimerRef.current = null;
+              }
+              if (event.response?.status !== "completed") {
+                // Cancelada por barge-in: no se habla.
+                cancelGeneration();
+              } else if (gen.streamFailed && gen.firstAudioByteAt === null) {
+                // El streaming falló antes del primer byte: fallback al
+                // pipeline completo (criterio: siempre hay voz).
+                gen.fallbackUsed = true;
+                publishLatency(gen);
+                ttsGenRef.current = null;
+                if (fullText.trim()) void playTtsAudio(fullText);
+              } else {
+                const rest = gen.chunker.finalize();
+                if (rest) sendTtsChunk(gen, rest);
+                gen.stream?.endOfText();
+                publishLatency(gen);
+                if (!gen.stream) ttsGenRef.current = null; // solo tool call, sin texto
+              }
+            } else if (event.response?.status === "completed" && fullText.trim()) {
+              // Modo http_full (o generación no registrada): pipeline clásico.
+              void playTtsAudio(fullText);
               break;
             }
+            if (statusRef.current === "thinking" && !ttsGenRef.current) {
+              setStatusSafe(deriveReadyStatus());
+            }
+            break;
           }
           // Si la respuesta no produjo audio, vuelve al estado de reposo.
           if (statusRef.current === "thinking") setStatusSafe(deriveReadyStatus());
@@ -839,13 +1071,17 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       }
     },
     [
+      cancelGeneration,
       deriveReadyStatus,
       handleFunctionCall,
       maybeExtractMemory,
       maybeInjectMemories,
       playTtsAudio,
+      publishLatency,
       recordExchange,
       recordLatency,
+      scheduleChunkFlush,
+      sendTtsChunk,
       setStatusSafe,
       stopTtsPlayback,
     ],
@@ -890,6 +1126,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         }
         const session = (await sessionResponse.json()) as SessionResponse;
         engineRef.current = session.voiceEngine ?? "openai_realtime";
+        ttsConfigRef.current = session.tts ?? DEFAULT_TTS_CONFIG;
         const gateCfg = session.audioGate ?? null;
         gateEnabledRef.current = gateCfg?.enabled ?? false;
         setAudioGateConfig(gateCfg);
@@ -1312,6 +1549,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       memoryActive,
       lastRecall,
       memorySavedCount,
+      lastLatency,
       connect,
       disconnect,
       restart,
@@ -1346,6 +1584,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       memoryActive,
       lastRecall,
       memorySavedCount,
+      lastLatency,
       connect,
       disconnect,
       restart,

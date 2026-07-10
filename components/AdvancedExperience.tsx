@@ -181,6 +181,7 @@ export default function AdvancedExperience({
           micSettings: realtime.micSettings,
           gate: realtime.gate,
           listenMode: realtime.listenMode,
+          lastLatency: realtime.lastLatency,
         }}
       />
 

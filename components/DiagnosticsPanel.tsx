@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { AppError } from "@/lib/shared/errors";
-import type { AgentStatus, ListenMode, MicSettingsInfo, SessionInfo } from "@/lib/shared/types";
+import type { AgentStatus, LatencyReport, ListenMode, MicSettingsInfo, SessionInfo } from "@/lib/shared/types";
 import { statusLabel } from "./ConnectionStatus";
 import { CloseIcon } from "./Icons";
 
@@ -20,6 +20,7 @@ interface DiagnosticsData {
   micSettings: MicSettingsInfo | null;
   gate: { state: string; noiseFloor: number; threshold: number; blockedNoises: number; level: number };
   listenMode: ListenMode;
+  lastLatency: LatencyReport | null;
 }
 
 interface ServerConfig {
@@ -198,6 +199,44 @@ export default function DiagnosticsPanel({
             </div>
           ))}
         </dl>
+
+        {data.lastLatency && (
+          <>
+            <h3 className="diag-subtitle">Latencia (última respuesta)</h3>
+            <dl className="diag-grid">
+              {(
+                [
+                  ["Fin de voz → primer audio SONANDO", data.lastLatency.speechEndToFirstAudioPlayMs],
+                  ["Fin de voz → primer delta de texto", data.lastLatency.speechEndToFirstTextDeltaMs],
+                  ["Primer delta → envío a TTS", data.lastLatency.firstTextDeltaToTtsSendMs],
+                  ["Envío TTS → primer byte de audio", data.lastLatency.ttsSendToFirstAudioByteMs],
+                  ["Primer byte → reproducción", data.lastLatency.firstAudioByteToPlayMs],
+                  ["Fin de voz → respuesta completa", data.lastLatency.totalResponseDoneMs],
+                ] as Array<[string, number | null]>
+              ).map(([label, value]) => (
+                <div className="diag-row" key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value !== null ? `${value} ms` : "—"}</dd>
+                </div>
+              ))}
+              <div className="diag-row">
+                <dt>Modo TTS / transporte</dt>
+                <dd>
+                  {data.lastLatency.ttsMode} / {data.lastLatency.transport}
+                </dd>
+              </div>
+              <div className="diag-row">
+                <dt>Chunks / primer chunk</dt>
+                <dd>
+                  {data.lastLatency.chunksSent} · {data.lastLatency.firstChunkChars ?? "—"} chars
+                  {data.lastLatency.fallbackUsed ? " · fallback" : ""}
+                  {data.lastLatency.cancelled ? " · cancelada" : ""}
+                  {data.lastLatency.hadToolCalls ? " · tools" : ""}
+                </dd>
+              </div>
+            </dl>
+          </>
+        )}
 
         <h3 className="diag-subtitle">Escucha</h3>
         <p className="diag-note">

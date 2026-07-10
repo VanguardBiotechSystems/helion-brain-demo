@@ -44,6 +44,34 @@ export interface MicSettingsInfo {
   };
 }
 
+/** Configuración de TTS streaming que el servidor entrega al cliente. */
+export interface TtsClientConfig {
+  mode: "http_stream" | "http_full";
+  firstChunkMinChars: number;
+  chunkMinChars: number;
+  maxChunkWaitMs: number;
+  audioStartBufferMs: number;
+}
+
+/** Métricas de latencia de la última generación (modo debug). */
+export interface LatencyReport {
+  ttsMode: string;
+  transport: string;
+  speechEndToResponseCreatedMs: number | null;
+  speechEndToFirstTextDeltaMs: number | null;
+  firstTextDeltaToTtsSendMs: number | null;
+  ttsSendToFirstAudioByteMs: number | null;
+  speechEndToFirstAudioByteMs: number | null;
+  firstAudioByteToPlayMs: number | null;
+  speechEndToFirstAudioPlayMs: number | null;
+  totalResponseDoneMs: number | null;
+  firstChunkChars: number | null;
+  chunksSent: number;
+  fallbackUsed: boolean;
+  cancelled: boolean;
+  hadToolCalls: boolean;
+}
+
 /** Resumen de recuerdo para UI y herramientas (sin embedding). */
 export interface MemorySummary {
   id: string;
@@ -93,4 +121,5 @@ export interface SessionResponse {
   voiceEngine: VoiceEngine;
   audioGate?: ClientGateConfig;
   memory?: { enabled: boolean; autoSave: boolean };
+  tts?: TtsClientConfig;
 }
