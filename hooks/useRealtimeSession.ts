@@ -24,6 +24,7 @@ import {
   type SimulatedGesture,
 } from "@/lib/robot/tools";
 import { MEMORY_TOOL_NAMES } from "@/lib/server/memory/tools";
+import { IDENTITY_TOOL_NAMES } from "@/lib/server/identityTools";
 import { useAudioGate } from "./useAudioGate";
 import type { ConversationLog } from "./useConversationLog";
 
@@ -289,6 +290,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   const exchangesRef = useRef<ExchangeMessage[]>([]);
   const extractWatermarkRef = useRef(0);
   const injectedMemoryIdsRef = useRef(new Set<string>());
+  // Cambio de identidad conversacional: al terminar la respuesta en curso
+  // se reinicia la sesión para reconstruir contexto y memoria autorizada.
+  const identityRestartRef = useRef(false);
   const logRef = useRef(log);
 
   logRef.current = log;
@@ -604,6 +608,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
               setStatusSafe(deriveReadyStatus());
               publishLatency(gen);
               if (ttsGenRef.current === gen) ttsGenRef.current = null;
+              if (identityRestartRef.current) {
+                identityRestartRef.current = false;
+                void restartRef.current();
+              }
             },
             onError: (message) => {
               if (gen.cancelled) return;
@@ -816,7 +824,31 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       if (ttsGenRef.current) ttsGenRef.current.hadToolCalls = true;
 
       let output: Record<string, unknown>;
-      if (
+      if (name === IDENTITY_TOOL_NAMES.set || name === IDENTITY_TOOL_NAMES.reset) {
+        try {
+          const endpoint = name === IDENTITY_TOOL_NAMES.set ? "/api/identity/resolve" : "/api/identity/reset";
+          let args: Record<string, unknown> = {};
+          try { args = JSON.parse(argsJson || "{}") as Record<string, unknown>; } catch { args = {}; }
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: args.name, pin: args.pin }),
+          });
+          const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+          if (response.ok && (body?.ok as boolean)) {
+            // Identidad cambiada: reconstruir contexto al acabar de hablar.
+            identityRestartRef.current = true;
+            injectedMemoryIdsRef.current.clear();
+            setLastRecall([]);
+            output = { ...body, note: "Identidad actualizada; el contexto se reconstruirá ahora mismo." };
+            logRef.current.addSystem("Identidad de sesión actualizada. Reconstruyendo contexto…");
+          } else {
+            output = body ?? { ok: false };
+          }
+        } catch {
+          output = { ok: false, error: "Identidad no disponible ahora mismo." };
+        }
+      } else if (
         name === MEMORY_TOOL_NAMES.save ||
         name === MEMORY_TOOL_NAMES.recall ||
         name === MEMORY_TOOL_NAMES.forget
@@ -1000,6 +1032,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         case "output_audio_buffer.stopped":
         case "output_audio_buffer.cleared":
           setStatusSafe(deriveReadyStatus());
+          if (identityRestartRef.current) {
+            identityRestartRef.current = false;
+            void restartRef.current();
+          }
           break;
 
         case "response.function_call_arguments.done":
@@ -1088,6 +1124,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   );
 
   const scheduleReconnectRef = useRef<() => void>(() => {});
+  const restartRef = useRef<() => Promise<void>>(async () => {});
 
   // ── Conexión ───────────────────────────────────────────────────────────
 
@@ -1369,6 +1406,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     await new Promise((resolve) => setTimeout(resolve, 200));
     await connect();
   }, [connect, disconnect]);
+  restartRef.current = restart;
 
   const toggleMute = useCallback(() => {
     setMuted((current) => {

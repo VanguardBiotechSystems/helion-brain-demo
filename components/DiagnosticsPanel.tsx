@@ -56,6 +56,7 @@ export default function DiagnosticsPanel({
 }) {
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [browserInfo, setBrowserInfo] = useState({ userAgent: "", webrtc: false, online: true });
+  const [identity, setIdentity] = useState<{ displayName?: string; role?: string; identityStatus?: string; trustLevel?: string; memoryScopes?: string[] } | null>(null);
   const [voiceTest, setVoiceTest] = useState<{ state: "idle" | "loading" | "playing" | "error"; message: string }>({
     state: "idle",
     message: "",
@@ -96,6 +97,7 @@ export default function DiagnosticsPanel({
       webrtc: "RTCPeerConnection" in window && !!navigator.mediaDevices?.getUserMedia,
       online: navigator.onLine,
     });
+    fetch("/api/identity/current").then((r) => (r.ok ? r.json() : null)).then(setIdentity).catch(() => {});
     if (!config) {
       fetch("/api/config")
         .then((response) => (response.ok ? response.json() : null))
@@ -143,7 +145,8 @@ export default function DiagnosticsPanel({
     value === true ? "sí" : value === false ? "no" : "desconocido";
 
   const rows: Array<[string, string]> = [
-    ["Perfil actual", config?.profile ? `${config.profile.displayName} (${config.profile.role})` : "—"],
+    ["Identidad actual", identity ? `${identity.displayName} · ${identity.role} · ${identity.identityStatus} · ${identity.trustLevel}` : "—"],
+    ["Scopes de memoria", identity?.memoryScopes?.join(", ") ?? "—"],
     ["Modelo realtime", model],
     ["Motor de voz", engine],
     ["Voz", voice],
@@ -239,6 +242,15 @@ export default function DiagnosticsPanel({
             </dl>
           </>
         )}
+
+        <button
+          className="btn btn-small"
+          onClick={() => {
+            void fetch("/api/identity/reset", { method: "POST" }).then(() => window.location.reload());
+          }}
+        >
+          Resetear identidad de sesión
+        </button>
 
         <h3 className="diag-subtitle">Escucha</h3>
         <p className="diag-note">

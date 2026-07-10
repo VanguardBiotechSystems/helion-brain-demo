@@ -28,9 +28,9 @@ export async function POST(request: NextRequest) {
   }
 
   const token = request.cookies.get(ACCESS_COOKIE)?.value;
-  const profileId = verifyAccessToken(env.sessionSecret, token);
-  const profile = getProfileById(env.profiles, profileId);
-  if (!profile) {
+  const session = verifyAccessToken(env.sessionSecret, token);
+  const profile = session ? getProfileById(env.profiles, session.profileId, env.identity.allowDynamicProfiles) : null;
+  if (!session || !profile) {
     return NextResponse.json(
       { error: { code: "not_authenticated", message: "La sesión de acceso ha caducado." } },
       { status: 401 },
@@ -67,7 +67,15 @@ export async function POST(request: NextRequest) {
   }
 
   // Identidad del interlocutor y autoconocimiento: salen del SERVIDOR.
-  const identityBlock = `\n\n# Interlocutor actual\nEstás hablando con ${profile.displayName} (rol: ${profile.role}). Lo sabes por su acceso; no lo anuncies salvo que te lo pregunten ("¿quién soy?", "¿con quién hablas?").\nPRIVACIDAD: solo dispones de los recuerdos autorizados para este perfil. Los recuerdos privados de otras personas NO existen en esta conversación: jamás los menciones ni confirmes su existencia.`;
+  const identityStatus = session!.identityStatus;
+  const pinNote =
+    env.identity.requireOwnerPin && !env.identity.ownerPin
+      ? " (aviso: OWNER_IDENTITY_PIN no configurado; el owner se acepta sin PIN en modo demo)"
+      : "";
+  const identityBlock =
+    identityStatus === "unknown"
+      ? `\n\n# Identidad del interlocutor: DESCONOCIDA\nEl passcode solo abre la puerta; aún NO sabes con quién hablas. En tu PRIMERA respuesta pregunta: "Antes de empezar, dime con quién estoy hablando." Cuando se identifiquen ("Soy Sergio", "Soy Juanma", "soy un inversor"), usa la herramienta identity_set con ese nombre. Si el perfil exige PIN, la herramienta te lo dirá: pídelo con naturalidad. Si prefieren no identificarse, usa identity_set con "visitante". Hasta identificar: NO uses ni menciones recuerdos privados ni de proyecto interno; solo material público/demo. También puedes cambiar de interlocutor a mitad de sesión ("ahora habla Sergio") con identity_set, o limpiar con identity_reset.${pinNote}`
+      : `\n\n# Interlocutor actual\nEstás hablando con ${profile.displayName} (rol: ${profile.role}, identidad ${identityStatus}). No lo anuncies salvo que pregunten ("¿quién soy para ti?"). Si otra persona toma el relevo ("ahora habla Sergio", "soy Juanma otra vez"), usa identity_set; para olvidar la identidad de la sesión, identity_reset.\nPRIVACIDAD: solo dispones de los recuerdos autorizados para este perfil. Los recuerdos privados de otras personas NO existen en esta conversación: jamás los menciones ni confirmes su existencia.`;
   let selfKnowledgeBlock = "";
   if (env.memory.selfKnowledgeEnabled) {
     const health = await getMemoryHealth(env).catch(() => null);

@@ -1,6 +1,7 @@
 import type { ErrorCode } from "@/lib/shared/errors";
 import { REALTIME_ROBOT_TOOLS } from "@/lib/robot/tools";
 import { REALTIME_MEMORY_TOOLS } from "./memory/tools";
+import { REALTIME_IDENTITY_TOOLS } from "./identityTools";
 import type { AppEnv } from "./env";
 import { buildAgentInstructions } from "./personality";
 import { logError, logInfo } from "./log";
@@ -94,9 +95,11 @@ export function buildRealtimeSessionConfig(
     audio.output = { voice: env.realtimeVoice };
   }
 
-  const tools = env.memory.enabled
-    ? [...REALTIME_ROBOT_TOOLS, ...REALTIME_MEMORY_TOOLS]
-    : REALTIME_ROBOT_TOOLS;
+  const tools = [
+    ...REALTIME_ROBOT_TOOLS,
+    ...(env.memory.enabled ? REALTIME_MEMORY_TOOLS : []),
+    ...(env.identity.enabled ? REALTIME_IDENTITY_TOOLS : []),
+  ];
 
   const config: Record<string, unknown> = {
     type: "realtime",
