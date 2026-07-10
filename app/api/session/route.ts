@@ -53,12 +53,15 @@ export async function POST(request: NextRequest) {
   // La memoria tiene presupuesto duro: si el almacén tarda más de
   // MEMORY_MAX_BLOCKING_MS, la sesión arranca sin contexto (y la memoria
   // llega igualmente por turno y por herramientas). Nunca bloquea la voz.
+  // Identidad solo CONFIRMADA abre lo privado (sección 7). Una cookie que
+  // "sugiere" a alguien (claimed) no basta: hasta confirmar, contexto público.
+  const confirmedIdentity = session.identityStatus === "confirmed";
   let memoryContext = "";
   if (env.memory.enabled) {
     try {
       const store = await getMemoryStore(env);
       memoryContext = await Promise.race([
-        buildSessionMemoryContext(store, env, profile),
+        buildSessionMemoryContext(store, env, profile, confirmedIdentity),
         new Promise<string>((resolve) => setTimeout(() => resolve(""), env.memory.maxBlockingMs)),
       ]);
     } catch (error) {
@@ -72,13 +75,22 @@ export async function POST(request: NextRequest) {
     env.identity.requireOwnerPin && !env.identity.ownerPin
       ? " (aviso: OWNER_IDENTITY_PIN no configurado; el owner se acepta sin PIN en modo demo)"
       : "";
+  // Tres estados de interlocutor (sección 7): DESCONOCIDO (preguntar),
+  // SUGERIDO (cookie sin confirmar: reconocer con duda, sin abrir lo privado),
+  // CONFIRMADO (identidad verificada). El owner sugerido exige PIN.
+  const suggested = identityStatus === "claimed" || identityStatus === "guest";
   const identityBlock =
     identityStatus === "unknown"
       ? `
 
 # Interlocutor: DESCONOCIDO
 En tu primera respuesta pregunta: "Antes de empezar, dime con quién estoy hablando." Al identificarse ("Soy Sergio"), usa identity_set (si pide PIN, pídelo con naturalidad); si prefieren no decirlo, identity_set con "visitante". Hasta entonces: solo material público/demo, nada privado ni de proyecto.${pinNote}`
-      : `
+      : suggested
+        ? `
+
+# Interlocutor: PROBABLE ${profile.displayName} (sin confirmar)
+Puede que vuelvas a hablar con ${profile.displayName}, pero NO lo des por seguro. Pregúntalo con naturalidad ("¿Sigues siendo tú, ${profile.displayName}?") y confírmalo con identity_set${profile.role === "owner" ? " (como owner, pídele el PIN)" : ""}. Hasta confirmar: nada privado ni de proyecto; solo material público/demo.${pinNote}`
+        : `
 
 # Interlocutor
 Hablas con ${profile.displayName} (${profile.role}); no lo anuncies salvo que pregunten. Cambio de persona → identity_set; "olvida quién soy" → identity_reset. Los recuerdos privados de otros NO existen en esta conversación.`;

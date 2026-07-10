@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { matchGatePasscode, matchProfileByAlias, resolveProfiles, getProfileById, type AccessProfile } from "@/lib/server/profiles";
-import { canProfileAccessMemory, detectScopeCues, filterMemoriesForProfile } from "@/lib/server/memory/permissions";
+import { canProfileAccessMemory, detectScopeCues, filterMemoriesForProfile, filterMemoriesForRetrieval } from "@/lib/server/memory/permissions";
 import { migrateLegacyScopes, type MemoryItem } from "@/lib/server/memory/types";
 import { containsSecret } from "@/lib/server/memory/redaction";
 import { validateCuratorOutput } from "@/lib/server/memory/curator";
@@ -141,5 +141,36 @@ describe("persistencia real e inyección filtrada", () => {
     expect(forSergio).not.toContain("prototipo B");
     const forJuanma = await buildSessionMemoryContext(store, env!, juanma);
     expect(forJuanma).toContain("prototipo B");
+  });
+});
+
+describe("identidad sugerida y aislamiento entre perfiles (bloque 2)", () => {
+  it("una identidad SUGERIDA (sin confirmar) no abre lo privado ni lo de proyecto", async () => {
+    const store = new LocalMemoryStore("/dev/null/no-persist.json");
+    const items = [mem("private", "juanma"), mem("project"), mem("project_demo"), mem("public"), mem("system_self")];
+    const restricted = filterMemoriesForRetrieval(items, juanma, false); // NO confirmado
+    const scopes = restricted.map((m) => m.scope).sort();
+    expect(scopes).toEqual(["project_demo", "public", "system_self"]);
+    // Confirmado sí abre lo suyo.
+    const full = filterMemoriesForRetrieval(items, juanma, true);
+    expect(full.map((m) => m.scope)).toContain("private");
+    void store;
+  });
+
+  it("cero fugas: lo privado de Juanma NUNCA llega a Sergio, ni confirmado", () => {
+    const juanmaPrivate = mem("private", "juanma");
+    expect(filterMemoriesForRetrieval([juanmaPrivate], sergio, true)).toHaveLength(0);
+    expect(filterMemoriesForProfile([juanmaPrivate], sergio)).toHaveLength(0);
+  });
+
+  it("el técnico no ve memoria privada de nadie", () => {
+    const tecnico: AccessProfile = {
+      id: "tecnico", displayName: "Técnico", role: "technician", aliases: ["tecnico"], trustLevel: "technician",
+      requiresPin: false, memoryScopes: ["project_demo", "public", "system_self"],
+      canManageMemory: false, canViewDebug: false, canCreateProjectMemory: false,
+    };
+    const items = [mem("private", "juanma"), mem("project"), mem("project_demo")];
+    const visible = filterMemoriesForProfile(items, tecnico).map((m) => m.scope);
+    expect(visible).toEqual(["project_demo"]);
   });
 });

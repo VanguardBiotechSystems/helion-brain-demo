@@ -4,11 +4,13 @@ import { logError, logInfo } from "../log";
 import {
   backfillAssertionType,
   migrateLegacyScopes,
+  nowIso,
   type MemoryEvent,
   type MemoryItem,
   type MemoryListFilter,
   type MemoryRelation,
   type MemoryStore,
+  type ProfileRecord,
 } from "./types";
 
 /**
@@ -23,6 +25,7 @@ interface LocalData {
   items: MemoryItem[];
   relations: MemoryRelation[];
   events: MemoryEvent[];
+  profiles?: ProfileRecord[];
 }
 
 export class LocalMemoryStore implements MemoryStore {
@@ -30,6 +33,7 @@ export class LocalMemoryStore implements MemoryStore {
   private items = new Map<string, MemoryItem>();
   private relations: MemoryRelation[] = [];
   private events: MemoryEvent[] = [];
+  private profiles = new Map<string, ProfileRecord>();
   private persistable = true;
   private persistWarned = false;
 
@@ -49,6 +53,7 @@ export class LocalMemoryStore implements MemoryStore {
       }
       this.relations = data.relations ?? [];
       this.events = data.events ?? [];
+      for (const p of data.profiles ?? []) this.profiles.set(p.id, p);
       logInfo("memory", `Memoria local cargada: ${this.items.size} recuerdos (${this.filePath})`);
     } catch {
       // Archivo inexistente o ilegible: se parte de cero.
@@ -61,6 +66,7 @@ export class LocalMemoryStore implements MemoryStore {
       items: [...this.items.values()],
       relations: this.relations,
       events: this.events.slice(-2000),
+      profiles: [...this.profiles.values()],
     };
     try {
       await mkdir(dirname(this.filePath), { recursive: true });
@@ -143,5 +149,32 @@ export class LocalMemoryStore implements MemoryStore {
   async listEvents(memoryId?: string, limit = 100): Promise<MemoryEvent[]> {
     const events = memoryId ? this.events.filter((event) => event.memoryId === memoryId) : this.events;
     return events.slice(-limit).reverse();
+  }
+
+  async recordProfileUsage(record: { id: string; displayName: string; role: string; origin: "known" | "dynamic" }): Promise<void> {
+    const now = nowIso();
+    const existing = this.profiles.get(record.id);
+    this.profiles.set(record.id, {
+      id: record.id,
+      displayName: record.displayName,
+      role: record.role,
+      origin: record.origin,
+      status: "active", // usar un perfil lo reactiva
+      pinned: existing?.pinned ?? record.origin === "known",
+      createdAt: existing?.createdAt ?? now,
+      lastUsedAt: now,
+    });
+    await this.persist();
+  }
+
+  async listProfiles(): Promise<ProfileRecord[]> {
+    return [...this.profiles.values()].map((p) => ({ ...p, memoryCount: 0 }) as ProfileRecord);
+  }
+
+  async setProfileStatus(id: string, status: "active" | "archived"): Promise<void> {
+    const existing = this.profiles.get(id);
+    if (!existing) return;
+    this.profiles.set(id, { ...existing, status });
+    await this.persist();
   }
 }

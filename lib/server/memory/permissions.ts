@@ -62,6 +62,28 @@ export function filterMemoriesForProfile<T extends ScopedMemory>(items: T[], pro
   return items.filter((item) => canProfileAccessMemory(item, profile));
 }
 
+/**
+ * Filtro con estado de identidad (sección 7): si el interlocutor solo está
+ * SUGERIDO (cookie sin confirmar), lo privado y de proyecto NO se abre aunque
+ * el rol lo permita. Solo material público/demo/system_self/safety hasta que
+ * confirme. `confirmed=true` restaura el filtrado normal por perfil.
+ */
+export function filterMemoriesForRetrieval<T extends ScopedMemory>(
+  items: T[],
+  profile: AccessProfile,
+  confirmed: boolean,
+): T[] {
+  if (confirmed) return filterMemoriesForProfile(items, profile);
+  return items.filter((item) => {
+    if (item.scope === "public" || item.scope === "system_self" || item.scope === "safety") {
+      return canProfileAccessMemory(item, profile);
+    }
+    if (item.scope === "project_demo") return canProfileAccessMemory(item, profile);
+    // private / project / internal: bloqueados sin confirmación.
+    return false;
+  });
+}
+
 /** ¿Puede este perfil borrar/archivar esta memoria? */
 export function canProfileManageMemory(item: ScopedMemory & { createdByProfileId: string | null }, profile: AccessProfile): boolean {
   if (item.scope === "safety" || item.scope === "internal") return profile.canManageMemory;

@@ -26,7 +26,7 @@ import {
   type NewMemoryItem,
   type ScoredMemory,
 } from "./types";
-import { canProfileAccessMemory, detectScopeCues, filterMemoriesForProfile } from "./permissions";
+import { canProfileAccessMemory, detectScopeCues, filterMemoriesForProfile, filterMemoriesForRetrieval } from "./permissions";
 import type { AccessProfile } from "../profiles";
 
 /** Último error de memoria (seguro, sin secretos) para /api/memory/health. */
@@ -263,6 +263,8 @@ export interface SearchOptions {
   markAccessed?: boolean;
   /** Perfil del interlocutor: el filtrado de permisos es OBLIGATORIO aquí. */
   profile?: AccessProfile;
+  /** Identidad confirmada: sin ella no se abre lo privado ni lo de proyecto. */
+  confirmed?: boolean;
 }
 
 export async function searchMemories(
@@ -271,7 +273,7 @@ export async function searchMemories(
   query: string,
   options: SearchOptions = {},
 ): Promise<ScoredMemory[]> {
-  const { topK = env.memory.retrievalTopK, types, markAccessed = true, profile } = options;
+  const { topK = env.memory.retrievalTopK, types, markAccessed = true, profile, confirmed = true } = options;
   const embed = makeEmbedder(env);
   const queryEmbedding = query.trim() ? await embed(query) : null;
 
@@ -280,8 +282,8 @@ export async function searchMemories(
   const nowMs = Date.now();
   actives = actives.filter((item) => !(item.expiresAt && Date.parse(item.expiresAt) <= nowMs));
   // El filtrado por perfil ocurre ANTES del ranking: lo no autorizado no
-  // existe para este interlocutor.
-  if (profile) actives = filterMemoriesForProfile(actives, profile);
+  // existe para este interlocutor. Sin confirmación, nada privado/proyecto.
+  if (profile) actives = filterMemoriesForRetrieval(actives, profile, confirmed);
   if (types && types.length > 0) actives = actives.filter((item) => types.includes(item.type));
 
   const ranked = rankMemories(actives, { queryText: query, queryEmbedding }, topK);
@@ -301,11 +303,13 @@ export async function buildSessionMemoryContext(
   store: MemoryStore,
   env: AppEnv,
   profile?: AccessProfile,
+  confirmed = true,
 ): Promise<string> {
   let actives = await store.list({ status: "active", limit: 500 });
   // Capa E: filtrado server-side por perfil ANTES del ranking; lo no
-  // autorizado no existe para este interlocutor.
-  if (profile) actives = filterMemoriesForProfile(actives, profile);
+  // autorizado no existe para este interlocutor. Sin identidad confirmada
+  // (sección 7) tampoco se abre lo privado ni lo de proyecto.
+  if (profile) actives = filterMemoriesForRetrieval(actives, profile, confirmed);
   const ranked = rankMemories(actives, {}, Math.max(env.memory.retrievalTopK, 10));
   const safety = actives.filter((item) => item.type === "safety");
   const selection = [...safety, ...ranked.map((scored) => scored.item)];

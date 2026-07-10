@@ -148,6 +148,22 @@ export interface ScoredMemory {
   score: number;
 }
 
+/** Metadatos de ciclo de vida de un perfil (sección 9). */
+export interface ProfileRecord {
+  id: string;
+  displayName: string;
+  role: string;
+  /** "known" (registro fijo) | "dynamic" (creado al identificarse). */
+  origin: "known" | "dynamic";
+  status: "active" | "archived";
+  /** Fijado: no se archiva por inactividad. */
+  pinned: boolean;
+  createdAt: string;
+  lastUsedAt: string;
+  /** Nº de memorias cuyo dueño es este perfil (informativo; puede faltar). */
+  memoryCount?: number;
+}
+
 export interface MemoryStore {
   readonly provider: "local" | "postgres";
   init(): Promise<void>;
@@ -159,6 +175,10 @@ export interface MemoryStore {
   addRelation(relation: MemoryRelation): Promise<void>;
   logEvent(event: MemoryEvent): Promise<void>;
   listEvents(memoryId?: string, limit?: number): Promise<MemoryEvent[]>;
+  /** Ciclo de vida de perfiles dinámicos. */
+  recordProfileUsage(record: { id: string; displayName: string; role: string; origin: "known" | "dynamic" }): Promise<void>;
+  listProfiles(): Promise<ProfileRecord[]>;
+  setProfileStatus(id: string, status: "active" | "archived"): Promise<void>;
 }
 
 export function visibilityForScope(scope: MemoryScope): MemoryVisibility {

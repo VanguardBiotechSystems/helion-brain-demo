@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAccess } from "@/lib/server/apiGuard";
+import { activeCapabilities, identityPlane } from "@/lib/server/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +17,10 @@ export async function GET(request: NextRequest) {
     role: profile.role,
     trustLevel: profile.trustLevel,
     memoryScopes: profile.memoryScopes,
+    plane: identityPlane(profile, identityStatus),
+    capabilities: activeCapabilities(profile, identityStatus),
     canManageMemory: profile.canManageMemory,
-    canViewDebug: profile.canViewDebug && identityStatus === "confirmed",
+    canViewDebug: identityPlane(profile, identityStatus) === "privileged",
     ownerPinConfigured: Boolean(env.identity.ownerPin),
   });
 }

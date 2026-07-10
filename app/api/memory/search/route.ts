@@ -22,7 +22,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const store = await getMemoryStore(guard.env);
-    const results = await searchMemories(store, guard.env, query, { topK, profile: guard.profile });
+    const confirmed = guard.identityStatus === "confirmed";
+    const results = await searchMemories(store, guard.env, query, { topK, profile: guard.profile, confirmed });
     return NextResponse.json({
       results: results.map(({ item, score }) => ({
         id: item.id,

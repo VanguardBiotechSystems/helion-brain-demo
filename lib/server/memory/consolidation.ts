@@ -1,4 +1,6 @@
 import { cosineSimilarity } from "./embeddings";
+import { expireStalePending } from "./pending";
+import { archiveInactiveProfiles } from "./profileLifecycle";
 import { makeMemoryId, nowIso, type MemoryItem, type MemoryStore } from "./types";
 
 /**
@@ -84,6 +86,8 @@ export interface ConsolidationReport {
   archivedEpisodic: number;
   decayed: number;
   merged: number;
+  pendingExpired: number;
+  profilesArchived: number;
   skippedRecentRun: boolean;
   at: string;
 }
@@ -108,6 +112,8 @@ export async function runConsolidation(
     archivedEpisodic: 0,
     decayed: 0,
     merged: 0,
+    pendingExpired: 0,
+    profilesArchived: 0,
     skippedRecentRun: false,
     at: nowIso(),
   };
@@ -186,6 +192,12 @@ export async function runConsolidation(
       }
       absorbed.add(b.id);
     }
+  }
+
+  // 5) Pendientes caducadas y perfiles dinámicos inactivos.
+  if (!dryRun) {
+    report.pendingExpired = await expireStalePending(store, now);
+    report.profilesArchived = (await archiveInactiveProfiles(store, now)).archived.length;
   }
 
   report.ran = true;

@@ -6,6 +6,7 @@ import type {
   MemoryListFilter,
   MemoryRelation,
   MemoryStore,
+  ProfileRecord,
 } from "./types";
 
 /**
@@ -22,6 +23,10 @@ CREATE TABLE IF NOT EXISTS memory_profiles (
   display_name TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
+  origin TEXT NOT NULL DEFAULT 'known',
+  status TEXT NOT NULL DEFAULT 'active',
+  pinned BOOLEAN NOT NULL DEFAULT false,
+  last_used_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -176,6 +181,11 @@ export class PostgresMemoryStore implements MemoryStore {
         WHEN source = 'system' THEN 'fact'
         ELSE 'unclassified'
       END WHERE assertion_type IS NULL;
+      -- Ciclo de vida de perfiles (sección 9), idempotente.
+      ALTER TABLE memory_profiles ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'known';
+      ALTER TABLE memory_profiles ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+      ALTER TABLE memory_profiles ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE memory_profiles ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ NOT NULL DEFAULT now();
     `);
     await this.pool.query(
       `INSERT INTO memory_profiles (id, display_name, role)
@@ -351,5 +361,41 @@ export class PostgresMemoryStore implements MemoryStore {
       actor: row.actor,
       createdAt: new Date(row.created_at).toISOString(),
     }));
+  }
+
+  async recordProfileUsage(record: { id: string; displayName: string; role: string; origin: "known" | "dynamic" }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO memory_profiles (id, display_name, role, origin, status, pinned, last_used_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,'active',$5, now(), now(), now())
+       ON CONFLICT (id) DO UPDATE SET
+         display_name = EXCLUDED.display_name,
+         role = EXCLUDED.role,
+         status = 'active',
+         last_used_at = now(),
+         updated_at = now()`,
+      [record.id, record.displayName, record.role, record.origin, record.origin === "known"],
+    );
+  }
+
+  async listProfiles(): Promise<ProfileRecord[]> {
+    const result = await this.pool.query(
+      `SELECT p.*, (SELECT count(*) FROM memory_items m WHERE m.owner_profile_id = p.id) AS memory_count
+       FROM memory_profiles p ORDER BY p.last_used_at DESC`,
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      displayName: row.display_name,
+      role: row.role,
+      origin: (row.origin as "known" | "dynamic") ?? "known",
+      status: (row.status as "active" | "archived") ?? "active",
+      pinned: Boolean(row.pinned),
+      createdAt: new Date(row.created_at).toISOString(),
+      lastUsedAt: new Date(row.last_used_at ?? row.updated_at).toISOString(),
+      memoryCount: Number(row.memory_count ?? 0),
+    }) as ProfileRecord);
+  }
+
+  async setProfileStatus(id: string, status: "active" | "archived"): Promise<void> {
+    await this.pool.query("UPDATE memory_profiles SET status = $2, updated_at = now() WHERE id = $1", [id, status]);
   }
 }

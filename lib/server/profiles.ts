@@ -7,8 +7,8 @@ import { timingSafeEqual, createHash } from "node:crypto";
  * la memoria es común pero segmentada por la identidad actual.
  */
 
-export type ProfileRole = "owner" | "robot_creator" | "investor" | "team" | "visitor";
-export type TrustLevel = "owner" | "project_member" | "visitor";
+export type ProfileRole = "owner" | "robot_creator" | "technician" | "investor" | "team" | "visitor";
+export type TrustLevel = "owner" | "project_member" | "technician" | "visitor";
 export type IdentityStatus = "unknown" | "claimed" | "confirmed" | "guest";
 
 export interface AccessProfile {
@@ -29,11 +29,14 @@ const ROLE_DEFAULTS: Record<ProfileRole, Pick<AccessProfile, "trustLevel" | "mem
   owner: { trustLevel: "owner", memoryScopes: ["project", "project_demo", "public", "system_self", "safety"], canManageMemory: true, canViewDebug: true, canCreateProjectMemory: true, requiresPin: true },
   robot_creator: { trustLevel: "project_member", memoryScopes: ["project", "project_demo", "public", "system_self", "safety"], canManageMemory: false, canViewDebug: false, canCreateProjectMemory: true, requiresPin: false },
   team: { trustLevel: "project_member", memoryScopes: ["project", "project_demo", "public", "system_self"], canManageMemory: false, canViewDebug: false, canCreateProjectMemory: true, requiresPin: false },
+  // Técnico: acceso a estado técnico/salud/system_self ampliado y diagnósticos,
+  // pero NUNCA a memorias personales de nadie ni a herramientas de owner.
+  technician: { trustLevel: "technician", memoryScopes: ["project_demo", "public", "system_self"], canManageMemory: false, canViewDebug: false, canCreateProjectMemory: false, requiresPin: false },
   investor: { trustLevel: "visitor", memoryScopes: ["project_demo", "public", "system_self"], canManageMemory: false, canViewDebug: false, canCreateProjectMemory: false, requiresPin: false },
   visitor: { trustLevel: "visitor", memoryScopes: ["project_demo", "public", "system_self"], canManageMemory: false, canViewDebug: false, canCreateProjectMemory: false, requiresPin: false },
 };
 
-const VALID_ROLES: ProfileRole[] = ["owner", "robot_creator", "investor", "team", "visitor"];
+const VALID_ROLES: ProfileRole[] = ["owner", "robot_creator", "technician", "investor", "team", "visitor"];
 
 function makeProfile(id: string, displayName: string, role: ProfileRole, aliases: string[]): AccessProfile {
   return { id, displayName, aliases, role, ...ROLE_DEFAULTS[role] };
@@ -42,6 +45,7 @@ function makeProfile(id: string, displayName: string, role: ProfileRole, aliases
 const DEFAULT_PROFILES: AccessProfile[] = [
   makeProfile("juanma", "Juanma", "owner", ["juanma", "juan manuel", "juanma otra vez"]),
   makeProfile("sergio", "Sergio", "robot_creator", ["sergio", "el creador del robot", "el del robot"]),
+  makeProfile("tecnico", "Técnico", "technician", ["tecnico", "técnico", "soporte", "mantenimiento", "el tecnico"]),
   makeProfile("investor", "Inversor invitado", "investor", ["inversor", "investor", "un inversor"]),
   makeProfile("guest", "Visitante", "visitor", ["visitante", "invitado", "prefiero no decirlo", "guest"]),
 ];

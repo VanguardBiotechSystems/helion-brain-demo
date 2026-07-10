@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, ACCESS_TTL_MS, createAccessToken } from "@/lib/server/access";
 import { requireAccess } from "@/lib/server/apiGuard";
-import { logInfo } from "@/lib/server/log";
+import { logError, logInfo } from "@/lib/server/log";
+import { getMemoryStore } from "@/lib/server/memory/service";
 import { matchProfileByAlias, ownerPinMatches, slugifyProfileId, getProfileById } from "@/lib/server/profiles";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +53,18 @@ export async function POST(request: NextRequest) {
   }
   if (profile.role !== "owner") status = profile.id === "guest" ? "guest" : "confirmed";
   else if (!env.identity.ownerPin) status = "claimed"; // owner sin PIN: nunca "confirmed"
+
+  // Ciclo de vida: registra el uso del perfil (creación/último uso). Nunca
+  // debe romper la resolución de identidad.
+  if (env.memory.enabled) {
+    try {
+      const store = await getMemoryStore(env);
+      const origin = env.profiles.some((p) => p.id === profile.id) ? "known" : "dynamic";
+      await store.recordProfileUsage({ id: profile.id, displayName: profile.displayName, role: profile.role, origin });
+    } catch (error) {
+      logError("identity", "No se pudo registrar el uso del perfil", error);
+    }
+  }
 
   logInfo("identity", `Identidad de sesión → ${profile.id} (${status})`);
   const response = NextResponse.json({
