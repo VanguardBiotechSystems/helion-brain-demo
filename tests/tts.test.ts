@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ElevenLabsTtsProvider, clampTtsText } from "@/lib/server/tts";
+import { ElevenLabsTtsProvider, buildTtsRequestBody, clampTtsText } from "@/lib/server/tts";
 
 function audioResponse(bytes = 3): Response {
   return new Response(new Uint8Array(bytes).fill(1), {
@@ -105,6 +105,30 @@ describe("ElevenLabsTtsProvider", () => {
     vi.stubGlobal("fetch", vi.fn(async () => audioResponse(0)));
     const result = await provider().synthesize("Hola");
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("buildTtsRequestBody — voice_settings", () => {
+  it("incluye velocidad y ajustes de voz cuando se pasan", () => {
+    const body = buildTtsRequestBody("Hola", "eleven_flash_v2_5", {
+      speed: 1.08,
+      stability: 0.45,
+      similarityBoost: 0.75,
+      style: 0,
+      useSpeakerBoost: false,
+    });
+    expect(body.voice_settings).toEqual({
+      speed: 1.08,
+      stability: 0.45,
+      similarity_boost: 0.75,
+      style: 0,
+      use_speaker_boost: false,
+    });
+    expect(body.language_code).toBe("es");
+  });
+
+  it("sin ajustes no envía voice_settings", () => {
+    expect(buildTtsRequestBody("Hola", "eleven_flash_v2_5").voice_settings).toBeUndefined();
   });
 });
 

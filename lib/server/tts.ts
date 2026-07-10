@@ -62,6 +62,38 @@ function supportsLanguageCode(modelId: string): boolean {
   return /flash|turbo/i.test(modelId);
 }
 
+export interface VoiceSettings {
+  speed: number;
+  stability: number;
+  similarityBoost: number;
+  style: number;
+  useSpeakerBoost: boolean;
+}
+
+/** Cuerpo de la petición TTS (compartido por la ruta completa y la de streaming). */
+export function buildTtsRequestBody(
+  text: string,
+  modelId: string,
+  settings?: VoiceSettings,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = { text, model_id: modelId };
+  if (supportsLanguageCode(modelId)) {
+    body.language_code = "es";
+  }
+  if (settings) {
+    body.voice_settings = {
+      speed: settings.speed,
+      stability: settings.stability,
+      similarity_boost: settings.similarityBoost,
+      style: settings.style,
+      use_speaker_boost: settings.useSpeakerBoost,
+    };
+  }
+  return body;
+}
+
+export { mapElevenLabsFailure };
+
 function mapElevenLabsFailure(status: number): { ok: false; code: ErrorCode; message: string } {
   if (status === 401) {
     return {
@@ -122,6 +154,7 @@ export class ElevenLabsTtsProvider implements TtsProvider {
     private readonly modelId: string,
     private readonly outputFormat: string,
     private readonly baseUrl: string = "https://api.elevenlabs.io",
+    private readonly voiceSettings?: VoiceSettings,
   ) {}
 
   async synthesize(text: string, options?: TtsOptions): Promise<TtsResult> {
@@ -129,10 +162,7 @@ export class ElevenLabsTtsProvider implements TtsProvider {
     const modelId = options?.modelId ?? this.modelId;
     const outputFormat = options?.outputFormat ?? this.outputFormat;
 
-    const body: Record<string, unknown> = { text, model_id: modelId };
-    if (supportsLanguageCode(modelId)) {
-      body.language_code = "es";
-    }
+    const body = buildTtsRequestBody(text, modelId, this.voiceSettings);
 
     let response: Response;
     try {
@@ -178,10 +208,19 @@ export class ElevenLabsTtsProvider implements TtsProvider {
  */
 export function getTtsProvider(env: AppEnv): TtsProvider | null {
   if (!env.elevenLabsApiKey || !env.elevenLabsVoiceId) return null;
+  const tuning = env.elevenLabsTuning;
   return new ElevenLabsTtsProvider(
     env.elevenLabsApiKey,
     env.elevenLabsVoiceId,
     env.elevenLabsModel,
     env.elevenLabsOutputFormat,
+    "https://api.elevenlabs.io",
+    {
+      speed: tuning.speed,
+      stability: tuning.stability,
+      similarityBoost: tuning.similarityBoost,
+      style: tuning.style,
+      useSpeakerBoost: tuning.useSpeakerBoost,
+    },
   );
 }
