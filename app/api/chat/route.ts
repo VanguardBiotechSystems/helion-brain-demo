@@ -45,9 +45,9 @@ export async function POST(request: NextRequest) {
   }
 
   const token = request.cookies.get(ACCESS_COOKIE)?.value;
-  const profileId = verifyAccessToken(env.sessionSecret, token);
-  const profile = getProfileById(env.profiles, profileId);
-  if (!profile) {
+  const session = verifyAccessToken(env.sessionSecret, token);
+  const profile = session ? getProfileById(env.profiles, session.profileId, env.identity.allowDynamicProfiles) : null;
+  if (!session || !profile) {
     return NextResponse.json(
       { error: { code: "not_authenticated", message: "La sesión de acceso ha caducado." } },
       { status: 401 },
