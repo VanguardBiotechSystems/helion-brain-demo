@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/memory/consolidate",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}

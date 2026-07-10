@@ -11,6 +11,7 @@ import {
   type SecurityCode,
 } from "./sanitizer";
 import { rankMemories } from "./scoring";
+import { classifyRelation, decayedConfidenceOnSupersede } from "./relations";
 import { buildSecureMemoryContext } from "./retrieval";
 import { SEED_MEMORIES } from "./seeds";
 import {
@@ -212,6 +213,46 @@ export async function createMemory(
     actor,
     createdAt: nowIso(),
   });
+
+  // Revisión de creencias (sección 4): en la banda de similitud intermedia
+  // (0,75–0,92, por debajo del umbral de dedup) se relaciona el nuevo
+  // recuerdo con los previos. Actualización/sustitución baja la confianza
+  // del previo; la contradicción conserva ambos con una relación auditable.
+  const candidateText = `${input.title} ${input.canonicalContent ?? input.content}`;
+  for (const prev of actives) {
+    if (prev.id === item.id || prev.type === "safety" || prev.scope === "safety") continue;
+    // Solo se relacionan memorias del mismo dueño/alcance: nunca cruza perfiles.
+    if (prev.ownerProfileId !== item.ownerProfileId || prev.scope !== item.scope) continue;
+    const verdict = classifyRelation(prev, { embedding, text: candidateText, assertionType: item.assertionType });
+    if (!verdict.relation || verdict.relation === "duplicates") continue;
+    await store.addRelation({
+      id: makeMemoryId(),
+      sourceMemoryId: item.id,
+      targetMemoryId: prev.id,
+      relationType: verdict.relation,
+      confidence: Number(verdict.similarity.toFixed(2)),
+      createdAt: nowIso(),
+    });
+    if (verdict.supersedesPrevious) {
+      await store.update(prev.id, { confidence: decayedConfidenceOnSupersede(prev.confidence) });
+      await store.addRelation({
+        id: makeMemoryId(),
+        sourceMemoryId: item.id,
+        targetMemoryId: prev.id,
+        relationType: "supersedes",
+        confidence: Number(verdict.similarity.toFixed(2)),
+        createdAt: nowIso(),
+      });
+      await store.logEvent({
+        id: makeMemoryId(),
+        action: "updated",
+        memoryId: prev.id,
+        reason: `sustituido por ${item.id}: ${verdict.reason}`,
+        actor,
+        createdAt: nowIso(),
+      });
+    }
+  }
   return { ok: true, item };
 }
 

@@ -79,6 +79,8 @@ export interface MemoryConfig {
   defaultScope: "private" | "project" | "project_demo" | "public";
   /** Autoconocimiento seguro de Helion en las instrucciones. */
   selfKnowledgeEnabled: boolean;
+  /** Secreto para proteger el cron de consolidación (Bearer). Vacío = solo owner. */
+  consolidationSecret: string;
 }
 
 export interface AppEnv {
@@ -304,6 +306,7 @@ function readMemoryConfig(source: Record<string, string | undefined>): MemoryCon
       "project_demo",
     ),
     selfKnowledgeEnabled: parseBoolean(source.SELF_KNOWLEDGE_ENABLED, true),
+    consolidationSecret: source.MEMORY_CONSOLIDATION_SECRET?.trim() || source.CRON_SECRET?.trim() || "",
   };
 }
 
