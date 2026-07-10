@@ -410,7 +410,27 @@ export interface MemoryHealth {
  * local no puede escribir en disco (serverless), lo dice — Helion no debe
  * fingir que recuerda.
  */
-export async function getMemoryHealth(env: AppEnv): Promise<MemoryHealth> {
+const healthCacheStore = globalThis as unknown as {
+  __helionMemHealth?: { at: number; value: MemoryHealth };
+  __helionMemHealthComputes?: number;
+};
+/** Nº de cómputos reales (para tests de que la caché evita trabajo). */
+export function memoryHealthComputeCount(): number {
+  return healthCacheStore.__helionMemHealthComputes ?? 0;
+}
+
+export async function getMemoryHealth(env: AppEnv, maxAgeMs = 60_000): Promise<MemoryHealth> {
+  const cached = healthCacheStore.__helionMemHealth;
+  if (cached && Date.now() - cached.at < maxAgeMs) {
+    return cached.value;
+  }
+  const value = await computeMemoryHealth(env);
+  healthCacheStore.__helionMemHealth = { at: Date.now(), value };
+  return value;
+}
+
+async function computeMemoryHealth(env: AppEnv): Promise<MemoryHealth> {
+  healthCacheStore.__helionMemHealthComputes = (healthCacheStore.__helionMemHealthComputes ?? 0) + 1;
   const serverless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
   const base: MemoryHealth = {
     enabled: env.memory.enabled,
