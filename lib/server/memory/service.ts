@@ -4,7 +4,14 @@ import { cosineSimilarity, makeEmbedder, type EmbedFn } from "./embeddings";
 import { extractMemories, type CuratorInputMessage, type CuratorMemory } from "./curator";
 import { LocalMemoryStore } from "./localStore";
 import { containsSecret, SECRET_REJECTION_MESSAGE } from "./redaction";
-import { buildMemoryContext, rankMemories } from "./scoring";
+import {
+  classifyCandidateSafety,
+  recordSecurityEvent,
+  UNSAFE_REJECTION_MESSAGE,
+  type SecurityCode,
+} from "./sanitizer";
+import { rankMemories } from "./scoring";
+import { buildSecureMemoryContext } from "./retrieval";
 import { SEED_MEMORIES } from "./seeds";
 import {
   makeMemoryId,
@@ -116,20 +123,38 @@ export interface CreateMemoryResult {
   item?: MemoryItem;
   deduplicatedInto?: string;
   rejectedReason?: string;
+  /** Códigos de seguridad si se rechazó por metainstrucción (para auditoría). */
+  securityCodes?: SecurityCode[];
 }
 
 /**
- * Crea un recuerdo con las reglas duras: sin secretos y con deduplicación
- * semántica (si ya existe uno muy parecido, se actualiza en vez de crear).
+ * Crea un recuerdo con las reglas duras: clasificador determinista de
+ * metainstrucciones (capa A/B del cierre del vector de inyección), sin
+ * secretos y con deduplicación semántica (si ya existe uno muy parecido, se
+ * actualiza en vez de crear).
  */
 export async function createMemory(
   store: MemoryStore,
   input: NewMemoryItem,
-  options: { embed?: EmbedFn; actor?: MemoryActor; reason?: string } = {},
+  options: { embed?: EmbedFn; actor?: MemoryActor; reason?: string; actorProfileId?: string | null } = {},
 ): Promise<CreateMemoryResult> {
-  const { embed, actor = "system", reason = "" } = options;
-  const text = `${input.title} ${input.content}`;
+  const { embed, actor = "system", reason = "", actorProfileId = null } = options;
+  const text = `${input.title} ${input.content} ${input.canonicalContent ?? ""}`;
 
+  // Capa A/B: el contenido que intenta actuar como instrucción del sistema o
+  // que porta credenciales NO entra en el conjunto recuperable. Se registra
+  // como evento de seguridad agregado (sin el texto íntegro) y se rechaza.
+  const safety = classifyCandidateSafety(text);
+  if (!safety.safe) {
+    await recordSecurityEvent(store, safety.codes, text, actorProfileId);
+    logInfo("memory", `Guardado rechazado por seguridad: ${safety.codes.join(", ")}`);
+    const onlySecret = safety.codes.length === 1 && safety.codes[0] === "SECRET";
+    return {
+      ok: false,
+      rejectedReason: onlySecret ? SECRET_REJECTION_MESSAGE : UNSAFE_REJECTION_MESSAGE,
+      securityCodes: safety.codes,
+    };
+  }
   if (containsSecret(text)) {
     logInfo("memory", "Guardado rechazado: el contenido parece contener una credencial");
     return { ok: false, rejectedReason: SECRET_REJECTION_MESSAGE };
@@ -209,6 +234,9 @@ export async function searchMemories(
   const queryEmbedding = query.trim() ? await embed(query) : null;
 
   let actives = await store.list({ status: "active", limit: 1000 });
+  // Capa E: se excluye lo caducado antes de rankear ni marcar acceso.
+  const nowMs = Date.now();
+  actives = actives.filter((item) => !(item.expiresAt && Date.parse(item.expiresAt) <= nowMs));
   // El filtrado por perfil ocurre ANTES del ranking: lo no autorizado no
   // existe para este interlocutor.
   if (profile) actives = filterMemoriesForProfile(actives, profile);
@@ -233,12 +261,15 @@ export async function buildSessionMemoryContext(
   profile?: AccessProfile,
 ): Promise<string> {
   let actives = await store.list({ status: "active", limit: 500 });
+  // Capa E: filtrado server-side por perfil ANTES del ranking; lo no
+  // autorizado no existe para este interlocutor.
   if (profile) actives = filterMemoriesForProfile(actives, profile);
   const ranked = rankMemories(actives, {}, Math.max(env.memory.retrievalTopK, 10));
   const safety = actives.filter((item) => item.type === "safety");
   const selection = [...safety, ...ranked.map((scored) => scored.item)];
   const unique = [...new Map(selection.map((item) => [item.id, item])).values()];
-  return buildMemoryContext(unique, 1200);
+  // Capa D: encapsulado seguro, escapado y no-autoritativo.
+  return buildSecureMemoryContext(unique, { budgetChars: 1200 });
 }
 
 export interface ExtractionResult {

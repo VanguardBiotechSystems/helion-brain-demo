@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { memoryDisabledResponse, requireAccess } from "@/lib/server/apiGuard";
 import { logError } from "@/lib/server/log";
 import { getMemoryStore, searchMemories } from "@/lib/server/memory/service";
+import { neutralizeStoredContent } from "@/lib/server/memory/retrieval";
 
 export const dynamic = "force-dynamic";
 
@@ -26,8 +27,11 @@ export async function POST(request: NextRequest) {
       results: results.map(({ item, score }) => ({
         id: item.id,
         type: item.type,
+        assertionType: item.assertionType,
         title: item.title,
-        content: item.canonicalContent || item.content,
+        // El contenido devuelto al modelo (memory_recall) se neutraliza: un
+        // recuerdo no puede reinyectar una instrucción vía tool output.
+        content: neutralizeStoredContent(item.canonicalContent || item.content),
         scope: item.scope,
         importance: item.importance,
         confidence: item.confidence,
