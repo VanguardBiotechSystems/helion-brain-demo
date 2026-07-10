@@ -63,13 +63,30 @@ const TTS_OUTPUT_RULES = `
 # Salida por voz externa (modo TTS)
 - Tu texto se convierte en voz con un sintetizador externo: escribe EXACTAMENTE lo que debe decirse en voz alta, y nada más.
 - Prohibido el formato: nada de markdown, negritas, emojis, listas, encabezados ni acotaciones entre paréntesis o asteriscos.
-- Escribe los números, horas y siglas tal y como se pronuncian cuando pueda haber ambigüedad (p. ej. "las tres y media", "uve pe ene").
-- Brevedad estricta: como norma, cuatro o cinco frases como máximo por respuesta. Si el tema da para más, resume y ofrece continuar ("¿quieres que siga?").`;
+- Escribe los números, horas y siglas tal y como se pronuncian cuando pueda haber ambigüedad (p. ej. "las tres y media", "uve pe ene").`;
 
 export interface PersonalityOptions {
   memoryEnabled?: boolean;
   /** Bloque de recuerdos previos, ya curado y acotado (puede ser vacío). */
   memoryContext?: string;
+  /** Modo latencia rápida: respuestas orales ultrabreves. */
+  fastVoice?: boolean;
+  maxNormalSentences?: number;
+}
+
+function fastVoiceRules(maxSentences: number): string {
+  const sentenceWord = maxSentences === 1 ? "UNA sola frase" : `${maxSentences} frases como máximo`;
+  return `
+
+# Voz rápida (prioridad máxima)
+- Esto es conversación ORAL en tiempo real: cada palabra tuya cuesta tiempo de voz. Lo normal es ${sentenceWord}.
+- La primera frase debe ser inmediata y útil: responde primero, matiza después solo si hace falta.
+- Confirmaciones: de tres a seis palabras ("Hecho. Lo recordaré.", "Sí, te escucho bien.").
+- Preguntas simples: entre cinco y doce palabras.
+- Nada de arranques tipo "Vale," ni "Claro," sistemáticos: empieza por la información.
+- Frases cortas con pocas comas y sin puntos suspensivos: cada pausa se nota en la voz.
+- No menciones memoria, arquitectura ni seguridad salvo que la pregunta vaya de eso.
+- Solo te extiendes si lo piden explícitamente ("explícame", "detállalo") — y aun así, empieza con una frase corta.`;
 }
 
 export function buildAgentInstructions(
@@ -77,6 +94,7 @@ export function buildAgentInstructions(
   voiceEngine: PersonalityVoiceEngine = "openai_realtime",
   options: PersonalityOptions = {},
 ): string {
+  const fastBlock = options.fastVoice ? fastVoiceRules(options.maxNormalSentences ?? 1) : "";
   const memoryBlock = options.memoryEnabled
     ? `${MEMORY_RULES}${
         options.memoryContext
@@ -90,7 +108,7 @@ export function buildAgentInstructions(
 # Herramienta de gestos simulados
 - Dispones de la herramienta robot_gesture para registrar la INTENCIÓN de un gesto sencillo (saludar con la mano, mover la cabeza, cambiar la expresión facial, parada total).
 - Úsala cuando el usuario pida un gesto físico simple. La acción solo queda registrada y visible en pantalla como simulación: no mueve nada real, y así debes explicarlo en una frase breve.
-- Para acciones físicas complejas o peligrosas, no uses la herramienta: explica con honestidad que aún no es posible.${voiceEngine === "elevenlabs" ? TTS_OUTPUT_RULES : ""}${memoryBlock}`;
+- Para acciones físicas complejas o peligrosas, no uses la herramienta: explica con honestidad que aún no es posible.${voiceEngine === "elevenlabs" ? TTS_OUTPUT_RULES : ""}${fastBlock}${memoryBlock}`;
 }
 
 export function buildTextFallbackInstructions(agentName: string): string {

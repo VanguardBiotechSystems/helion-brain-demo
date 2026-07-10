@@ -56,4 +56,36 @@ describe("buildRealtimeSessionConfig", () => {
       buildRealtimeSessionConfig(envFor({ OPENAI_REALTIME_MODEL: "gpt-realtime" })).reasoning,
     ).toBeUndefined();
   });
+
+  it("HELION_REASONING_EFFORT se respeta", () => {
+    const config = buildRealtimeSessionConfig(envFor({ HELION_REASONING_EFFORT: "minimal" }));
+    expect(config.reasoning).toEqual({ effort: "minimal" });
+  });
+
+  it("elevenlabs + modo rápido recorta el silencio del VAD a 500 ms", () => {
+    const config = buildRealtimeSessionConfig(
+      envFor({ VOICE_ENGINE: "elevenlabs", ELEVENLABS_API_KEY: "k", ELEVENLABS_VOICE_ID: "v" }),
+    );
+    const input = (config.audio as { input: { turn_detection: { silence_duration_ms?: number } } }).input;
+    expect(input.turn_detection.silence_duration_ms).toBe(500);
+  });
+
+  it("un OPENAI_VAD_SILENCE_MS explícito gana al modo rápido", () => {
+    const config = buildRealtimeSessionConfig(
+      envFor({
+        VOICE_ENGINE: "elevenlabs",
+        ELEVENLABS_API_KEY: "k",
+        ELEVENLABS_VOICE_ID: "v",
+        OPENAI_VAD_SILENCE_MS: "800",
+      }),
+    );
+    const input = (config.audio as { input: { turn_detection: { silence_duration_ms?: number } } }).input;
+    expect(input.turn_detection.silence_duration_ms).toBe(800);
+  });
+
+  it("en modo openai_realtime el silencio del VAD no se recorta", () => {
+    const config = buildRealtimeSessionConfig(envFor());
+    const input = (config.audio as { input: { turn_detection: { silence_duration_ms?: number } } }).input;
+    expect(input.turn_detection.silence_duration_ms).toBe(650);
+  });
 });

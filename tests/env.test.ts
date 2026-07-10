@@ -115,6 +115,45 @@ describe("readEnv", () => {
     expect(env!.memory.provider).toBe("postgres");
   });
 
+  it("latencia: defaults agresivos de streaming y voz", () => {
+    const { env } = readEnv(BASE);
+    const tuning = env!.elevenLabsTuning;
+    expect(tuning.ttsModeRequested).toBe("websocket_stream");
+    expect(tuning.ttsMode).toBe("http_stream"); // resuelto: ver docs/DEMO_HANDOFF.md
+    expect(tuning.speed).toBe(1.08);
+    expect(tuning.style).toBe(0); // style > 0 añade latencia
+    expect(tuning.useSpeakerBoost).toBe(false);
+    expect(tuning.firstChunkMinChars).toBe(12);
+    expect(tuning.chunkMinChars).toBe(35);
+    expect(tuning.maxChunkWaitMs).toBe(80);
+    expect(tuning.audioStartBufferMs).toBe(50);
+    expect(env!.helion.reasoningEffort).toBe("low");
+    expect(env!.helion.latencyMode).toBe("fast");
+    expect(env!.helion.maxNormalSentences).toBe(1);
+    expect(env!.memory.maxBlockingMs).toBe(200);
+  });
+
+  it("ELEVENLABS_TTS_MODE=http_full desactiva el streaming", () => {
+    const { env } = readEnv({ ...BASE, ELEVENLABS_TTS_MODE: "http_full" });
+    expect(env!.elevenLabsTuning.ttsMode).toBe("http_full");
+  });
+
+  it("overrides de velocidad y chunking se respetan (con límites)", () => {
+    const { env } = readEnv({
+      ...BASE,
+      ELEVENLABS_SPEED: "1.15",
+      ELEVENLABS_FIRST_CHUNK_MIN_CHARS: "20",
+      ELEVENLABS_STYLE: "0.2",
+      HELION_REASONING_EFFORT: "minimal",
+      MEMORY_MAX_BLOCKING_MS: "150",
+    });
+    expect(env!.elevenLabsTuning.speed).toBe(1.15);
+    expect(env!.elevenLabsTuning.firstChunkMinChars).toBe(20);
+    expect(env!.elevenLabsTuning.style).toBe(0.2);
+    expect(env!.helion.reasoningEffort).toBe("minimal");
+    expect(env!.memory.maxBlockingMs).toBe(150);
+  });
+
   it("con MEMORY_ENABLED=false no se exige DATABASE_URL", () => {
     const { env } = readEnv({ ...BASE, MEMORY_ENABLED: "false", MEMORY_PROVIDER: "postgres" });
     expect(env).not.toBeNull();

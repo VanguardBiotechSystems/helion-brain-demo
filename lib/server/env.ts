@@ -28,10 +28,35 @@ export interface AudioConfig {
   turnDetection: TurnDetectionMode;
   vadThreshold: number;
   vadSilenceMs: number;
+  /** true si OPENAI_VAD_SILENCE_MS vino explícito en el entorno. */
+  vadSilenceMsFromEnv: boolean;
   vadPrefixPaddingMs: number;
   vadEagerness: VadEagerness;
   noiseReduction: NoiseReductionMode;
   gate: AudioGateEnvConfig;
+}
+
+export type TtsMode = "http_stream" | "http_full";
+
+export interface ElevenLabsTuning {
+  /** Modo pedido en env (websocket_stream se resuelve a http_stream; ver docs). */
+  ttsModeRequested: string;
+  ttsMode: TtsMode;
+  speed: number;
+  stability: number;
+  similarityBoost: number;
+  style: number;
+  useSpeakerBoost: boolean;
+  firstChunkMinChars: number;
+  chunkMinChars: number;
+  maxChunkWaitMs: number;
+  audioStartBufferMs: number;
+}
+
+export interface HelionTuning {
+  reasoningEffort: "minimal" | "low" | "medium" | "high";
+  latencyMode: "fast" | "balanced";
+  maxNormalSentences: number;
 }
 
 export interface MemoryConfig {
@@ -47,6 +72,8 @@ export interface MemoryConfig {
   requireConfirmationForSensitive: boolean;
   retentionDays: number | null;
   debug: boolean;
+  /** Presupuesto duro de bloqueo de memoria en el camino crítico (ms). */
+  maxBlockingMs: number;
 }
 
 export interface AppEnv {
@@ -68,6 +95,8 @@ export interface AppEnv {
   elevenLabsVoiceId: string;
   elevenLabsModel: string;
   elevenLabsOutputFormat: string;
+  elevenLabsTuning: ElevenLabsTuning;
+  helion: HelionTuning;
   audio: AudioConfig;
   memory: MemoryConfig;
 }
@@ -201,6 +230,9 @@ function readAudioConfig(source: Record<string, string | undefined>): AudioConfi
     ),
     vadThreshold: parseNumber(source.OPENAI_VAD_THRESHOLD, preset.vadThreshold, 0, 1),
     vadSilenceMs: parseNumber(source.OPENAI_VAD_SILENCE_MS, preset.vadSilenceMs, 100, 5000),
+    vadSilenceMsFromEnv: Boolean(
+      source.OPENAI_VAD_SILENCE_MS?.trim() && Number.isFinite(Number(source.OPENAI_VAD_SILENCE_MS.trim())),
+    ),
     vadPrefixPaddingMs: parseNumber(source.OPENAI_VAD_PREFIX_PADDING_MS, preset.vadPrefixPaddingMs, 0, 2000),
     vadEagerness: parseEnum<VadEagerness>(
       source.OPENAI_VAD_EAGERNESS,
@@ -248,6 +280,38 @@ function readMemoryConfig(source: Record<string, string | undefined>): MemoryCon
     requireConfirmationForSensitive: parseBoolean(source.MEMORY_REQUIRE_CONFIRMATION_FOR_SENSITIVE, true),
     retentionDays: retentionRaw > 0 ? retentionRaw : null,
     debug: parseBoolean(source.MEMORY_DEBUG, false),
+    maxBlockingMs: parseNumber(source.MEMORY_MAX_BLOCKING_MS, 200, 50, 2000),
+  };
+}
+
+function readElevenLabsTuning(source: Record<string, string | undefined>): ElevenLabsTuning {
+  const requested = source.ELEVENLABS_TTS_MODE?.trim() || "websocket_stream";
+  // websocket_stream (stream-input de ElevenLabs) exige un servidor de voz
+  // con estado, incompatible con serverless: se resuelve al streaming HTTP
+  // chunked, que da un TTFB equivalente por fragmento. Ver docs/DEMO_HANDOFF.md.
+  const ttsMode: TtsMode = requested === "http_full" ? "http_full" : "http_stream";
+  return {
+    ttsModeRequested: requested,
+    ttsMode,
+    speed: parseNumber(source.ELEVENLABS_SPEED, 1.08, 0.7, 1.2),
+    stability: parseNumber(source.ELEVENLABS_STABILITY, 0.45, 0, 1),
+    similarityBoost: parseNumber(source.ELEVENLABS_SIMILARITY_BOOST, 0.75, 0, 1),
+    // style > 0 añade latencia según la documentación de ElevenLabs:
+    // por defecto 0; súbelo solo si prefieres expresividad a velocidad.
+    style: parseNumber(source.ELEVENLABS_STYLE, 0, 0, 1),
+    useSpeakerBoost: parseBoolean(source.ELEVENLABS_USE_SPEAKER_BOOST, false),
+    firstChunkMinChars: parseNumber(source.ELEVENLABS_FIRST_CHUNK_MIN_CHARS, 12, 4, 120),
+    chunkMinChars: parseNumber(source.ELEVENLABS_CHUNK_MIN_CHARS, 35, 10, 300),
+    maxChunkWaitMs: parseNumber(source.ELEVENLABS_MAX_CHUNK_WAIT_MS, 80, 20, 1000),
+    audioStartBufferMs: parseNumber(source.ELEVENLABS_AUDIO_START_BUFFER_MS, 50, 0, 1000),
+  };
+}
+
+function readHelionTuning(source: Record<string, string | undefined>): HelionTuning {
+  return {
+    reasoningEffort: parseEnum(source.HELION_REASONING_EFFORT, ["minimal", "low", "medium", "high"], "low"),
+    latencyMode: parseEnum(source.HELION_LATENCY_MODE, ["fast", "balanced"], "fast"),
+    maxNormalSentences: parseNumber(source.HELION_MAX_NORMAL_SENTENCES, 1, 1, 4),
   };
 }
 
@@ -297,6 +361,8 @@ export function readEnv(source: Record<string, string | undefined> = process.env
       elevenLabsVoiceId: source.ELEVENLABS_VOICE_ID?.trim() ?? "",
       elevenLabsModel: source.ELEVENLABS_MODEL?.trim() || "eleven_flash_v2_5",
       elevenLabsOutputFormat: source.ELEVENLABS_OUTPUT_FORMAT?.trim() || "mp3_44100_128",
+      elevenLabsTuning: readElevenLabsTuning(source),
+      helion: readHelionTuning(source),
       audio: readAudioConfig(source),
       memory,
     },

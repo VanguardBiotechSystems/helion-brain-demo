@@ -46,11 +46,17 @@ export async function POST(request: NextRequest) {
 
   // Recuerdos previos para la continuidad entre sesiones. Un fallo de
   // memoria nunca debe impedir la conversación: se degrada a contexto vacío.
+  // La memoria tiene presupuesto duro: si el almacén tarda más de
+  // MEMORY_MAX_BLOCKING_MS, la sesión arranca sin contexto (y la memoria
+  // llega igualmente por turno y por herramientas). Nunca bloquea la voz.
   let memoryContext = "";
   if (env.memory.enabled) {
     try {
       const store = await getMemoryStore(env);
-      memoryContext = await buildSessionMemoryContext(store, env);
+      memoryContext = await Promise.race([
+        buildSessionMemoryContext(store, env),
+        new Promise<string>((resolve) => setTimeout(() => resolve(""), env.memory.maxBlockingMs)),
+      ]);
     } catch (error) {
       logError("session", "No se pudo construir el contexto de memoria", error);
     }
@@ -80,6 +86,13 @@ export async function POST(request: NextRequest) {
     memory: {
       enabled: env.memory.enabled,
       autoSave: env.memory.autoSave,
+    },
+    tts: {
+      mode: env.elevenLabsTuning.ttsMode,
+      firstChunkMinChars: env.elevenLabsTuning.firstChunkMinChars,
+      chunkMinChars: env.elevenLabsTuning.chunkMinChars,
+      maxChunkWaitMs: env.elevenLabsTuning.maxChunkWaitMs,
+      audioStartBufferMs: env.elevenLabsTuning.audioStartBufferMs,
     },
   });
 }

@@ -40,4 +40,18 @@ describe("personalidad — estilo conversacional humano", () => {
   it("el modo texto fallback comparte el estilo conciso", () => {
     expect(buildTextFallbackInstructions("Helion")).toContain("Estilo conversacional (prioridad máxima)");
   });
+
+  it("las reglas de voz rápida exigen una sola frase", () => {
+    const fast = buildAgentInstructions("Helion", "elevenlabs", {
+      fastVoice: true,
+      maxNormalSentences: 1,
+    });
+    expect(fast).toContain("Voz rápida (prioridad máxima)");
+    expect(fast).toContain("UNA sola frase");
+    expect(fast).toContain("tres a seis palabras");
+  });
+
+  it("sin modo rápido no se inyectan las reglas de voz rápida", () => {
+    expect(buildAgentInstructions("Helion", "elevenlabs")).not.toContain("Voz rápida");
+  });
 });

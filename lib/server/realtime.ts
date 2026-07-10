@@ -44,13 +44,21 @@ export function buildRealtimeSessionConfig(
   // La detección de turnos se parametriza por perfil de audio (ver
   // docs/AUDIO_GATE.md): server_vad conservador por defecto para no
   // dispararse con ruido; semantic_vad disponible por configuración.
+  // Modo latencia rápida + voz externa: el silencio del VAD baja a 500 ms
+  // (la síntesis externa ya añade su propio coste). Un override explícito
+  // de OPENAI_VAD_SILENCE_MS siempre gana.
+  const vadSilenceMs =
+    env.helion.latencyMode === "fast" && env.voiceEngine === "elevenlabs" && !audioCfg.vadSilenceMsFromEnv
+      ? Math.min(audioCfg.vadSilenceMs, 500)
+      : audioCfg.vadSilenceMs;
+
   const turnDetection =
     audioCfg.turnDetection === "server_vad"
       ? {
           type: "server_vad",
           threshold: audioCfg.vadThreshold,
           prefix_padding_ms: audioCfg.vadPrefixPaddingMs,
-          silence_duration_ms: audioCfg.vadSilenceMs,
+          silence_duration_ms: vadSilenceMs,
           create_response: true,
           interrupt_response: true,
         }
@@ -92,6 +100,8 @@ export function buildRealtimeSessionConfig(
     instructions: buildAgentInstructions(env.agentName, env.voiceEngine, {
       memoryEnabled: env.memory.enabled,
       memoryContext: extras.memoryContext,
+      fastVoice: env.helion.latencyMode === "fast",
+      maxNormalSentences: env.helion.maxNormalSentences,
     }),
     output_modalities: env.voiceEngine === "elevenlabs" ? ["text"] : ["audio"],
     audio,
@@ -99,10 +109,10 @@ export function buildRealtimeSessionConfig(
     tool_choice: "auto",
   };
 
-  // Los modelos realtime 2.x razonan; para conversación de baja latencia
-  // la documentación recomienda empezar con esfuerzo bajo.
+  // Los modelos realtime 2.x razonan; para voz el esfuerzo se mantiene
+  // bajo (configurable con HELION_REASONING_EFFORT).
   if (/^gpt-realtime-2/.test(env.realtimeModel)) {
-    config.reasoning = { effort: "low" };
+    config.reasoning = { effort: env.helion.reasoningEffort };
   }
 
   return config;
