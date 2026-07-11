@@ -121,5 +121,6 @@ export interface SessionResponse {
   voiceEngine: VoiceEngine;
   audioGate?: ClientGateConfig;
   memory?: { enabled: boolean; autoSave: boolean };
+  versions?: { app: string; prompt: string; selfModel: string };
   tts?: TtsClientConfig;
 }

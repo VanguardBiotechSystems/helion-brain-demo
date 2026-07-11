@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERROR_COPY, toAppError, type AppError, type ErrorCode } from "@/lib/shared/errors";
+import { sendTelemetry } from "@/lib/client/telemetry";
+import type { SessionEndCode } from "@/lib/shared/telemetry";
 import type {
   AgentStatus,
   ClientGateConfig,
@@ -251,6 +253,15 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     fallbacks: 0,
   });
   const [orbPulse, setOrbPulse] = useState<{ kind: "heard" | "memory" | "identity"; seq: number } | null>(null);
+  // Telemetría agregada (§2): datos de sesión para emitir al cerrar.
+  const sessionStartAtRef = useRef<number | null>(null);
+  const versionsRef = useRef({ app: "0.1.0", prompt: "unknown", selfModel: "unknown" });
+  const identitySwitchesRef = useRef(0);
+  const micIssuesRef = useRef(0);
+  const errorsByCategoryRef = useRef<Record<string, number>>({});
+  const memoryRejectedRef = useRef(0);
+  const memoryPendingRef = useRef(0);
+  const flushTelemetryRef = useRef<(endCode: SessionEndCode) => void>(() => {});
   const pulseSeqRef = useRef(0);
   const firePulse = useCallback((kind: "heard" | "memory" | "identity") => {
     pulseSeqRef.current += 1;
@@ -786,11 +797,13 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
             error?: { message?: string };
           } | null;
           if (!response.ok) {
+            memoryRejectedRef.current += 1;
             return { saved: false, reason: body?.error?.message ?? "No se pudo guardar." };
           }
           // Sensible: quedó pendiente. Pide confirmación y usa memory_confirm
           // con este confirmationId cuando la persona responda.
           if (body?.pending) {
+            memoryPendingRef.current += 1;
             return {
               saved: false,
               pending: true,
@@ -890,6 +903,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
             setLastRecall([]);
             // Barrido visual: Helion cierra un contexto y abre otro. No
             // muestra datos del perfil anterior (es solo un gesto del orbe).
+            identitySwitchesRef.current += 1;
             firePulse("identity");
             output = { ...body, note: "Identidad actualizada; el contexto se reconstruirá ahora mismo." };
             logRef.current.addSystem("Identidad de sesión actualizada. Reconstruyendo contexto…");
@@ -1241,6 +1255,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           throw new SessionError(toAppError("session_create_failed"));
         }
         const session = (await sessionResponse.json()) as SessionResponse;
+        sessionStartAtRef.current = performance.now();
+        if (session.versions) versionsRef.current = session.versions;
         engineRef.current = session.voiceEngine ?? "openai_realtime";
         ttsConfigRef.current = session.tts ?? DEFAULT_TTS_CONFIG;
         const gateCfg = session.audioGate ?? null;
@@ -1273,6 +1289,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
               audio: { ...requested, channelCount: 1 },
             });
           } catch (mediaError) {
+            micIssuesRef.current += 1;
             const name = mediaError instanceof DOMException ? mediaError.name : "";
             if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
               throw new SessionError(toAppError("mic_permission"));
@@ -1417,6 +1434,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         setError(appError);
         setStatus("error");
         statusRef.current = "error";
+        errorsByCategoryRef.current[appError.code] = (errorsByCategoryRef.current[appError.code] ?? 0) + 1;
+        // Un fallo de creación de sesión al conectar es telemetría de fin.
+        flushTelemetryRef.current(appError.code === "usage_limited" ? "usage_limited" : "error");
       } finally {
         connectingRef.current = false;
       }
@@ -1478,7 +1498,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     setStatus("idle");
     statusRef.current = "idle";
     setLatencyMs(null);
-    if (wasActive) logRef.current.addSystem("Sesión finalizada.");
+    if (wasActive) {
+      logRef.current.addSystem("Sesión finalizada.");
+      flushTelemetryRef.current("user_ended");
+    }
   }, [cleanupPeer, maybeExtractMemory]);
 
   const restart = useCallback(async () => {
@@ -1645,6 +1668,38 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     }),
     [gateHook.gateState, gateHook.noiseFloor, gateHook.threshold, gateHook.blockedNoises, gateHook.level],
   );
+
+  // Emite telemetría agregada al cerrar (§2). Lee datos vivos por refs para
+  // no depender de closures obsoletos. NUNCA envía texto ni contenido.
+  flushTelemetryRef.current = (endCode: SessionEndCode) => {
+    if (sessionStartAtRef.current === null) return;
+    const durationMs = performance.now() - sessionStartAtRef.current;
+    sessionStartAtRef.current = null; // evita doble envío
+    sendTelemetry({
+      appVersion: versionsRef.current.app,
+      promptVersion: versionsRef.current.prompt,
+      selfModelVersion: versionsRef.current.selfModel,
+      voiceMode: engineRef.current === "elevenlabs" ? "calidad_voz" : "demo_estable",
+      provider: engineRef.current === "elevenlabs" ? "elevenlabs" : "openai",
+      sessionDurationMs: durationMs,
+      turns: sessionStats.turns,
+      latenciesMs: sessionStats.latenciesMs,
+      fastResponses: sessionStats.fastResponses,
+      interruptionsAttempted: sessionStats.interruptions,
+      interruptionsSucceeded: sessionStats.interruptions,
+      noiseBlocked: gateHook.blockedNoises,
+      reconnects: sessionStats.reconnects,
+      errorsByCategory: { ...errorsByCategoryRef.current },
+      fallbacks: sessionStats.fallbacks,
+      micDeniedOrLost: micIssuesRef.current,
+      memoryAvailability: memoryEnabledRef.current ? "available" : "unavailable",
+      memorySaved: memorySavedCount,
+      memoryRejected: memoryRejectedRef.current,
+      memoryPending: memoryPendingRef.current,
+      identitySwitches: identitySwitchesRef.current,
+      endCode,
+    });
+  };
 
   return useMemo(
     () => ({

@@ -4,7 +4,8 @@ import { readEnv } from "@/lib/server/env";
 import { getProfileById } from "@/lib/server/profiles";
 import { createRealtimeClientSecret } from "@/lib/server/realtime";
 import { buildSessionMemoryContext, getMemoryStore, getMemoryHealth } from "@/lib/server/memory/service";
-import { buildSelfKnowledgeBlock } from "@/lib/server/memory/selfKnowledge";
+import { buildSelfKnowledgeBlock, SELF_KNOWLEDGE_VERSION } from "@/lib/server/memory/selfKnowledge";
+import { VOICE_CONSTITUTION_VERSION } from "@/lib/server/personality";
 import { clientIpFrom, enforceRateLimit } from "@/lib/server/rateLimit";
 import { logError } from "@/lib/server/log";
 import { captureError, captureMessage } from "@/lib/server/observability";
@@ -154,6 +155,11 @@ Hablas con ${profile.displayName} (${profile.role}); no lo anuncies salvo que pr
       autoSave: env.memory.autoSave,
     },
     profile: { id: profile.id, displayName: profile.displayName, role: profile.role },
+    versions: {
+      app: process.env.npm_package_version ?? "0.1.0",
+      prompt: VOICE_CONSTITUTION_VERSION,
+      selfModel: SELF_KNOWLEDGE_VERSION,
+    },
     tts: {
       mode: env.elevenLabsTuning.ttsMode,
       firstChunkMinChars: env.elevenLabsTuning.firstChunkMinChars,
