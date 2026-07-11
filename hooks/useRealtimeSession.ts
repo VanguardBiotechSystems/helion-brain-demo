@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERROR_COPY, toAppError, type AppError, type ErrorCode } from "@/lib/shared/errors";
 import { sendTelemetry } from "@/lib/client/telemetry";
+import { evaluateAddressing, type AddressingDecision, type WakeConfig } from "@/lib/wake/addressingGate";
 import type { SessionEndCode } from "@/lib/shared/telemetry";
 import type {
   AgentStatus,
@@ -14,7 +15,9 @@ import type {
   SessionInfo,
   SessionResponse,
   TtsClientConfig,
+  UiClientConfig,
   VoiceEngine,
+  WakeClientConfig,
 } from "@/lib/shared/types";
 import { SentenceChunker } from "@/lib/voice/chunker";
 import { TtsStreamSession } from "@/lib/voice/streamingTts";
@@ -209,6 +212,12 @@ export interface RealtimeSession {
   sessionStats: { turns: number; fastResponses: number; interruptions: number; latenciesMs: number[]; reconnects: number; fallbacks: number };
   /** Pulso perceptivo del orbe ("te he oído" / recuerdo guardado). */
   orbPulse: { kind: "heard" | "memory" | "identity"; seq: number } | null;
+  /** Escucha permanente con activación por nombre (wake mode = directed). */
+  wakeDirected: boolean;
+  /** Dentro de la ventana atenta (llamado hace poco): responde sin repetir nombre. */
+  attentive: boolean;
+  /** Nombre principal para el hint de UI ("Di 'Helion'…"). */
+  agentNameHint: string;
   connect(): Promise<void>;
   disconnect(): void;
   restart(): Promise<void>;
@@ -253,6 +262,14 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     fallbacks: 0,
   });
   const [orbPulse, setOrbPulse] = useState<{ kind: "heard" | "memory" | "identity"; seq: number } | null>(null);
+  // Escucha permanente con activación inteligente (wake / AddressingGate).
+  const [attentive, setAttentive] = useState(false);
+  const wakeConfigRef = useRef<WakeClientConfig | null>(null);
+  const uiConfigRef = useRef<UiClientConfig | null>(null);
+  const attentiveUntilRef = useRef(0);
+  const attentiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disconnectRef = useRef<() => void>(() => {});
+
   // Telemetría agregada (§2): datos de sesión para emitir al cerrar.
   const sessionStartAtRef = useRef<number | null>(null);
   const versionsRef = useRef({ app: "0.1.0", prompt: "unknown", selfModel: "unknown" });
@@ -413,6 +430,12 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       clearTimeout(identityRestartTimerRef.current);
       identityRestartTimerRef.current = null;
     }
+    if (attentiveTimerRef.current) {
+      clearTimeout(attentiveTimerRef.current);
+      attentiveTimerRef.current = null;
+    }
+    attentiveUntilRef.current = 0;
+    setAttentive(false);
     const dc = dcRef.current;
     dcRef.current = null;
     if (dc) {
@@ -702,6 +725,74 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       sendEvent({ type: "output_audio_buffer.clear" });
     }
   }, [sendEvent, stopTtsPlayback]);
+
+  // ── Activación por direccionamiento (wake) ────────────────────────────────
+
+  /** Abre/renueva la ventana atenta durante attentionWindowMs. */
+  const openAttention = useCallback(() => {
+    const cfg = wakeConfigRef.current;
+    if (!cfg || cfg.attentionWindowMs <= 0) return;
+    attentiveUntilRef.current = performance.now() + cfg.attentionWindowMs;
+    setAttentive(true);
+    if (attentiveTimerRef.current) clearTimeout(attentiveTimerRef.current);
+    attentiveTimerRef.current = setTimeout(() => {
+      if (performance.now() >= attentiveUntilRef.current) setAttentive(false);
+    }, cfg.attentionWindowMs + 50);
+  }, []);
+
+  const isAttentive = useCallback(() => performance.now() < attentiveUntilRef.current, []);
+
+  /**
+   * Decide si un turno va DIRIGIDO a Helion. Reglas primero; para casos
+   * "uncertain" consulta el clasificador de modelo con timeout bajo y
+   * fallback SEGURO (no responder). El texto escrito se considera dirigido.
+   */
+  const evaluateTurn = useCallback(
+    async (text: string, inputMode: "voice" | "text"): Promise<AddressingDecision> => {
+      const clientCfg = wakeConfigRef.current;
+      const config: WakeConfig | undefined = clientCfg
+        ? {
+            mode: clientCfg.mode,
+            agentNames: clientCfg.agentNames,
+            requireDirectAddress: clientCfg.requireDirectAddress,
+            attentionWindowMs: clientCfg.attentionWindowMs,
+            minConfidence: clientCfg.minConfidence,
+            respondToMentions: clientCfg.respondToMentions,
+            rulesFirst: clientCfg.rulesFirst,
+            requireNameForFirstTurn: clientCfg.requireNameForFirstTurn,
+          }
+        : undefined;
+      const decision = evaluateAddressing({
+        text,
+        inputMode,
+        attentive: isAttentive(),
+        agentSpeaking: statusRef.current === "speaking",
+        config,
+      });
+      // Ambiguo por reglas → clasificador de modelo (opcional, timeout bajo).
+      if (decision.mode === "uncertain" && inputMode === "voice" && clientCfg?.modelClassifierEnabled) {
+        try {
+          const res = await fetch("/api/wake/classify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, agentName: clientCfg.agentNames[0] ?? "Helion" }),
+            signal: requestTimeoutSignal(500),
+          });
+          const body = (await res.json().catch(() => null)) as
+            | { ok?: boolean; isAddressedToHelion?: boolean; confidence?: string; cleanedUserText?: string }
+            | null;
+          if (body?.ok && body.isAddressedToHelion) {
+            return { ...decision, shouldRespond: true, mode: "direct_address", reason: "clasificador de modelo", cleanedUserText: body.cleanedUserText ?? decision.cleanedUserText };
+          }
+        } catch {
+          // timeout/fallo → fallback seguro (no responder).
+        }
+        return { ...decision, shouldRespond: false, mode: "background", reason: "ambiguo, sin confirmación del modelo" };
+      }
+      return decision;
+    },
+    [isAttentive],
+  );
 
   // ── Memoria ────────────────────────────────────────────────────────────
 
@@ -1027,9 +1118,50 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         case "conversation.item.input_audio_transcription.completed":
           if (event.item_id) {
             const transcript = event.transcript ?? "";
-            logRef.current.finalizeUser(event.item_id, transcript);
-            recordExchange("user", transcript);
-            void maybeInjectMemories(transcript);
+            const itemId = event.item_id;
+            const cfg = wakeConfigRef.current;
+            if (!cfg || cfg.mode !== "directed") {
+              // Modo open (o sin config): el modelo responde solo; comportamiento previo.
+              logRef.current.finalizeUser(itemId, transcript);
+              recordExchange("user", transcript);
+              void maybeInjectMemories(transcript);
+              break;
+            }
+            // Escucha permanente con activación inteligente: decide si responder.
+            void evaluateTurn(transcript, "voice").then((decision) => {
+              if (!decision.shouldRespond) {
+                // NO dirigido: sin memoria, sin respuesta. Transcript pasivo opcional.
+                if (uiConfigRef.current?.transcriptShowIgnored && cfg.allowBackgroundTranscript) {
+                  const note = decision.mode === "mention_only" ? "Mención detectada, no respondida" : "Ignorado: no dirigido a Helion";
+                  logRef.current.markUserIgnored(itemId, transcript, note);
+                } else {
+                  logRef.current.finalizeUser(itemId, ""); // quita la burbuja pendiente
+                }
+                // El turno de fondo no debe contaminar el contexto del modelo.
+                sendEvent({ type: "conversation.item.delete", item_id: itemId });
+                return;
+              }
+              logRef.current.finalizeUser(itemId, transcript);
+              if (decision.mode === "command") {
+                // "para/cállate" → cortar; "apágate" → apagar. Sin respuesta.
+                const norm = transcript.toLowerCase();
+                if (/apag[aá]|ap[aá]gate/.test(norm)) {
+                  disconnectRef.current();
+                } else {
+                  cancelActiveResponse();
+                  if (statusRef.current === "speaking" || statusRef.current === "thinking") setStatusSafe(deriveReadyStatus());
+                  openAttention();
+                }
+                sendEvent({ type: "conversation.item.delete", item_id: itemId });
+                return;
+              }
+              // Dirigido: registra, inyecta memoria y PIDE respuesta (create_response
+              // está desactivado en el servidor para modo directed).
+              recordExchange("user", decision.cleanedUserText || transcript);
+              void maybeInjectMemories(decision.cleanedUserText || transcript);
+              openAttention();
+              sendEvent({ type: "response.create" });
+            });
           }
           break;
 
@@ -1230,17 +1362,21 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       }
     },
     [
+      cancelActiveResponse,
       cancelGeneration,
       deriveReadyStatus,
+      evaluateTurn,
       firePulse,
       handleFunctionCall,
       maybeExtractMemory,
       maybeInjectMemories,
+      openAttention,
       playTtsAudio,
       publishLatency,
       recordExchange,
       recordLatency,
       scheduleChunkFlush,
+      sendEvent,
       sendTtsChunk,
       setStatusSafe,
       stopTtsPlayback,
@@ -1288,6 +1424,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         const session = (await sessionResponse.json()) as SessionResponse;
         sessionStartAtRef.current = performance.now();
         if (session.versions) versionsRef.current = session.versions;
+        if (session.wake) wakeConfigRef.current = session.wake;
+        if (session.ui) uiConfigRef.current = session.ui;
         // Degradación de voz por coste: se informa, nunca es silenciosa.
         if (session.voiceDowngraded) {
           logRef.current.addSystem("Voz de calidad no disponible ahora: uso la voz estable.");
@@ -1547,6 +1685,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     }
   }, [cleanupPeer, maybeExtractMemory]);
 
+  disconnectRef.current = disconnect;
+
   const restart = useCallback(async () => {
     disconnect();
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -1588,9 +1728,12 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       sendEvent({ type: "response.create" });
       recordExchange("user", trimmed);
       void maybeInjectMemories(trimmed);
+      // Escribir es intención explícita: abre también la ventana atenta para
+      // que un siguiente turno de voz de seguimiento pueda responderse.
+      openAttention();
       return true;
     },
-    [cancelActiveResponse, maybeInjectMemories, recordExchange, sendEvent],
+    [cancelActiveResponse, maybeInjectMemories, openAttention, recordExchange, sendEvent],
   );
 
   const resumeAudio = useCallback(() => {
@@ -1768,6 +1911,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       lastLatency,
       sessionStats,
       orbPulse,
+      wakeDirected: wakeConfigRef.current?.mode === "directed",
+      attentive,
+      agentNameHint: wakeConfigRef.current?.agentNames[0] ?? "Helion",
       connect,
       disconnect,
       restart,
@@ -1805,6 +1951,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       lastLatency,
       sessionStats,
       orbPulse,
+      attentive,
       connect,
       disconnect,
       restart,

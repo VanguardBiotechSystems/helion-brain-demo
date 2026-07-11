@@ -98,6 +98,12 @@ export interface TranscriptEntry {
   at: number;
   pending?: boolean;
   action?: RobotActionInfo;
+  /** Turno de usuario detectado pero NO dirigido a Helion (mención/fondo). */
+  ignored?: boolean;
+  /** Nota corta (p. ej. "Mención detectada, no respondida"). */
+  note?: string;
+  /** Origen del turno de usuario: voz o texto escrito. */
+  inputMode?: "voice" | "text";
 }
 
 /** Motor que genera la voz del agente. */
@@ -124,5 +130,29 @@ export interface SessionResponse {
   versions?: { app: string; prompt: string; selfModel: string };
   /** true si la voz de calidad se degradó a demo_estable por control de coste. */
   voiceDowngraded?: boolean;
+  wake?: WakeClientConfig;
+  ui?: UiClientConfig;
   tts?: TtsClientConfig;
+}
+
+export interface WakeClientConfig {
+  mode: "directed" | "open";
+  agentNames: string[];
+  requireDirectAddress: boolean;
+  attentionWindowMs: number;
+  minConfidence: "high" | "medium" | "low";
+  respondToMentions: boolean;
+  rulesFirst: boolean;
+  requireNameForFirstTurn: boolean;
+  allowBackgroundTranscript: boolean;
+  modelClassifierEnabled: boolean;
+}
+
+export interface UiClientConfig {
+  textInputEnabled: boolean;
+  transcriptPanelEnabled: boolean;
+  transcriptDefaultOpen: boolean;
+  textInputSpeaksResponse: boolean;
+  transcriptShowIgnored: boolean;
+  transcriptPersist: boolean;
 }

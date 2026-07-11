@@ -123,6 +123,8 @@ export interface AppEnv {
   audio: AudioConfig;
   memory: MemoryConfig;
   costControl: CostControlEnv;
+  wake: WakeEnv;
+  ui: UiEnv;
 }
 
 export interface CostControlEnv {
@@ -132,6 +134,29 @@ export interface CostControlEnv {
   killOpenai: boolean;
   killElevenlabs: boolean;
   ownerExempt: boolean;
+}
+
+export interface WakeEnv {
+  /** directed = solo responde si se dirigen a Helion; open = a todo. */
+  mode: "directed" | "open";
+  agentNames: string[];
+  requireDirectAddress: boolean;
+  attentionWindowMs: number;
+  minConfidence: "high" | "medium" | "low";
+  respondToMentions: boolean;
+  rulesFirst: boolean;
+  requireNameForFirstTurn: boolean;
+  allowBackgroundTranscript: boolean;
+  modelClassifierEnabled: boolean;
+}
+
+export interface UiEnv {
+  textInputEnabled: boolean;
+  transcriptPanelEnabled: boolean;
+  transcriptDefaultOpen: boolean;
+  textInputSpeaksResponse: boolean;
+  transcriptShowIgnored: boolean;
+  transcriptPersist: boolean;
 }
 
 export interface EnvResult {
@@ -438,8 +463,40 @@ export function readEnv(source: Record<string, string | undefined> = process.env
       audio: readAudioConfig(source),
       memory,
       costControl: readCostControl(source),
+      wake: readWakeConfig(source),
+      ui: readUiConfig(source),
     },
     missing: [],
+  };
+}
+
+function readWakeConfig(source: Record<string, string | undefined>): WakeEnv {
+  const names = (source.WAKE_AGENT_NAMES?.trim() || "Helion,Elion,Helión")
+    .split(",")
+    .map((n) => n.trim())
+    .filter(Boolean);
+  return {
+    mode: parseEnum<"directed" | "open">(source.WAKE_MODE, ["directed", "open"], "directed"),
+    agentNames: names.length > 0 ? names : ["Helion"],
+    requireDirectAddress: parseBoolean(source.WAKE_REQUIRE_DIRECT_ADDRESS, true),
+    attentionWindowMs: parseNumber(source.WAKE_ATTENTION_WINDOW_MS, 10_000, 0, 120_000),
+    minConfidence: parseEnum<"high" | "medium" | "low">(source.WAKE_MIN_CONFIDENCE, ["high", "medium", "low"], "medium"),
+    respondToMentions: parseBoolean(source.WAKE_RESPOND_TO_MENTIONS, false),
+    rulesFirst: parseBoolean(source.WAKE_RULES_FIRST, true),
+    requireNameForFirstTurn: parseBoolean(source.WAKE_REQUIRE_NAME_FOR_FIRST_TURN, true),
+    allowBackgroundTranscript: parseBoolean(source.WAKE_ALLOW_BACKGROUND_TRANSCRIPT, true),
+    modelClassifierEnabled: parseBoolean(source.WAKE_MODEL_CLASSIFIER_ENABLED, true),
+  };
+}
+
+function readUiConfig(source: Record<string, string | undefined>): UiEnv {
+  return {
+    textInputEnabled: parseBoolean(source.TEXT_INPUT_ENABLED, true),
+    transcriptPanelEnabled: parseBoolean(source.TRANSCRIPT_PANEL_ENABLED, true),
+    transcriptDefaultOpen: parseBoolean(source.TRANSCRIPT_DEFAULT_OPEN, true),
+    textInputSpeaksResponse: parseBoolean(source.TEXT_INPUT_SPEAKS_RESPONSE, true),
+    transcriptShowIgnored: parseBoolean(source.TRANSCRIPT_SHOW_IGNORED_UTTERANCES, true),
+    transcriptPersist: parseBoolean(source.TRANSCRIPT_PERSIST, false),
   };
 }
 

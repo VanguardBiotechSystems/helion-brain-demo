@@ -15,9 +15,11 @@ import type { RobotActionInfo, TranscriptEntry } from "@/lib/shared/types";
 export interface ConversationLog {
   entries: TranscriptEntry[];
   count: number;
-  addUser(text: string): void;
+  addUser(text: string, inputMode?: "voice" | "text"): void;
   appendUserPartial(itemId: string, delta: string): void;
   finalizeUser(itemId: string, transcript: string): void;
+  /** Marca un turno de usuario como NO dirigido a Helion (mención/fondo). */
+  markUserIgnored(itemId: string, transcript: string, note: string): void;
   startAgent(responseId: string): void;
   appendAgent(responseId: string, delta: string): void;
   finalizeAgent(responseId: string, transcript?: string): void;
@@ -34,9 +36,24 @@ function makeId(): string {
 export function useConversationLog(): ConversationLog {
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
 
-  const addUser = useCallback((text: string) => {
-    const entry: TranscriptEntry = { id: makeId(), role: "user", text, at: Date.now() };
+  const addUser = useCallback((text: string, inputMode: "voice" | "text" = "voice") => {
+    const entry: TranscriptEntry = { id: makeId(), role: "user", text, at: Date.now(), inputMode };
     setEntries((prev) => [...prev, entry]);
+  }, []);
+
+  const markUserIgnored = useCallback((itemId: string, transcript: string, note: string) => {
+    const id = `user-${itemId}`;
+    const finalText = transcript.trim();
+    if (!finalText) {
+      // Silencio/ruido sin texto: quita la burbuja pendiente si la hubiera.
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+      return;
+    }
+    setEntries((prev) => {
+      const exists = prev.some((e) => e.id === id);
+      const ignored = { id, role: "user" as const, text: finalText, at: Date.now(), ignored: true, note, inputMode: "voice" as const };
+      return exists ? prev.map((e) => (e.id === id ? { ...e, ...ignored, pending: false } : e)) : [...prev, ignored];
+    });
   }, []);
 
   const appendUserPartial = useCallback((itemId: string, delta: string) => {
@@ -125,6 +142,7 @@ export function useConversationLog(): ConversationLog {
       addUser,
       appendUserPartial,
       finalizeUser,
+      markUserIgnored,
       startAgent,
       appendAgent,
       finalizeAgent,
@@ -132,6 +150,6 @@ export function useConversationLog(): ConversationLog {
       addSystem,
       clear,
     }),
-    [entries, addUser, appendUserPartial, finalizeUser, startAgent, appendAgent, finalizeAgent, addAction, addSystem, clear],
+    [entries, addUser, appendUserPartial, finalizeUser, markUserIgnored, startAgent, appendAgent, finalizeAgent, addAction, addSystem, clear],
   );
 }

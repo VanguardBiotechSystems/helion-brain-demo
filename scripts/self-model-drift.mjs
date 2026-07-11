@@ -60,7 +60,8 @@ for (const q of SELF_MODEL_QUESTIONS) {
   const missingConcepts = q.mustConvey.filter((c) => !lower.includes(c.toLowerCase()));
   const leaked = q.mustNotContain.filter((c) => lower.includes(c.toLowerCase()));
   const ok = missingConcepts.length === 0 && leaked.length === 0;
-  ok ? pass++ : fail++;
+  if (ok) pass++;
+  else fail++;
   console.log(`${ok ? "✅" : "❌"} [${q.id}] ${q.question}`);
   console.log(`   → ${answer.replace(/\s+/g, " ").slice(0, 160)}`);
   if (missingConcepts.length) console.log(`   falta transmitir: ${missingConcepts.join(", ")}`);

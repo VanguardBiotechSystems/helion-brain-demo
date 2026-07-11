@@ -57,6 +57,12 @@ export function buildRealtimeSessionConfig(
       ? Math.min(audioCfg.vadSilenceMs, 500)
       : audioCfg.vadSilenceMs;
 
+  // Escucha permanente con activación inteligente: en modo "directed" el
+  // servidor NO responde automáticamente a cada turno detectado. El VAD
+  // segmenta y transcribe, y el CLIENTE decide (AddressingGate) si Helion
+  // debe responder — solo entonces envía response.create. interrupt_response
+  // se mantiene para que la voz del usuario corte a Helion (barge-in).
+  const autoRespond = env.wake.mode !== "directed";
   const turnDetection =
     audioCfg.turnDetection === "server_vad"
       ? {
@@ -64,13 +70,13 @@ export function buildRealtimeSessionConfig(
           threshold: audioCfg.vadThreshold,
           prefix_padding_ms: audioCfg.vadPrefixPaddingMs,
           silence_duration_ms: vadSilenceMs,
-          create_response: true,
+          create_response: autoRespond,
           interrupt_response: true,
         }
       : {
           type: "semantic_vad",
           eagerness: audioCfg.vadEagerness,
-          create_response: true,
+          create_response: autoRespond,
           interrupt_response: true,
         };
 
