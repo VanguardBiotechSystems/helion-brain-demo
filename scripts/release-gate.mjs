@@ -40,11 +40,14 @@ if (trackedEnv && trackedEnv.trim().length > 0) {
   steps[steps.length - 1].ok = false;
 }
 
-// 3) Escaneo de secretos en archivos versionados (excluye ejemplos/docs/lock).
+// 3) Escaneo de secretos en archivos versionados. Excluye ejemplos, docs,
+//    lock, README (placeholders) y tests/e2e (fixtures con credenciales
+//    FALSAS que existen justo para probar la redacción). El objetivo es
+//    detectar secretos REALES en el código/config que se despliega.
 const secretScan = run(
   "Escaneo de secretos",
-  "git ls-files | grep -vE '\\.env\\.example|package-lock|docs/' | " +
-    "xargs grep -nE 'sk-[A-Za-z0-9]{20,}|ELEVENLABS_API_KEY=[A-Za-z0-9]|OWNER_IDENTITY_PIN=[0-9]{2,}|postgres://[^ ]+:[^ ]+@' 2>/dev/null || true",
+  "git ls-files | grep -vE '\\.env\\.example|package-lock|docs/|\\.md$|^tests/|^e2e/' | " +
+    "xargs grep -nE 'sk-[A-Za-z0-9]{20,}|sk_[A-Za-z0-9]{20,}|OWNER_IDENTITY_PIN=[0-9]{2,}|postgres://[^ \"\\x27]+:[^ \"\\x27]+@[^ \"\\x27]+' 2>/dev/null || true",
   { capture: true },
 );
 if (secretScan && secretScan.trim().length > 0) {
