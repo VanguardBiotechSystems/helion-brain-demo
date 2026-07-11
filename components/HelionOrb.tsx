@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type CSSProperties, type RefObject } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import type { AgentStatus } from "@/lib/shared/types";
 
 /**
@@ -38,18 +38,22 @@ interface OrbState {
   halo: number;
 }
 
+// Paleta por estado: azul = espera/escucha, amarillo = pensando,
+// verde = hablando, rojo = error, y "party" (casi blanco, sat mínima)
+// como modo especial activado a mano — ver handlePartyGesture más abajo.
 const ORB_STATES: Record<string, OrbState> = {
-  idle: { hues: [220, 254], sat: 62, energy: 0.06, speed: 0.25, scale: 0.8, pulse: 0.015, pull: 1, halo: 0.16 },
-  requesting_mic: { hues: [214, 250], sat: 66, energy: 0.15, speed: 0.5, scale: 0.87, pulse: 0.06, pull: 0.9, halo: 0.32 },
-  connecting: { hues: [214, 250], sat: 66, energy: 0.15, speed: 0.5, scale: 0.87, pulse: 0.06, pull: 0.9, halo: 0.32 },
-  calibrating: { hues: [201, 236], sat: 64, energy: 0.2, speed: 0.6, scale: 0.9, pulse: 0.07, pull: 1, halo: 0.38 },
-  standby: { hues: [218, 260], sat: 64, energy: 0.12, speed: 0.34, scale: 0.93, pulse: 0.028, pull: 1, halo: 0.3 },
-  voice_detected: { hues: [201, 240], sat: 68, energy: 0.26, speed: 0.68, scale: 0.96, pulse: 0.04, pull: 0.75, halo: 0.46 },
-  listening: { hues: [193, 228], sat: 70, energy: 0.34, speed: 0.8, scale: 1, pulse: 0.035, pull: 0.85, halo: 0.6 },
-  thinking: { hues: [254, 284], sat: 66, energy: 0.34, speed: 1.55, scale: 0.97, pulse: 0.07, pull: 0.55, halo: 0.5 },
-  speaking: { hues: [266, 302], sat: 68, energy: 0.38, speed: 1.0, scale: 1, pulse: 0.05, pull: 0.8, halo: 0.62 },
-  reconnecting: { hues: [222, 258], sat: 60, energy: 0.15, speed: 0.65, scale: 0.9, pulse: 0.09, pull: 1, halo: 0.32 },
-  error: { hues: [18, 36], sat: 48, energy: 0.12, speed: 0.28, scale: 0.85, pulse: 0.04, pull: 1, halo: 0.26 },
+  idle: { hues: [208, 226], sat: 58, energy: 0.06, speed: 0.25, scale: 0.8, pulse: 0.015, pull: 1, halo: 0.16 },
+  requesting_mic: { hues: [206, 224], sat: 64, energy: 0.15, speed: 0.5, scale: 0.87, pulse: 0.06, pull: 0.9, halo: 0.32 },
+  connecting: { hues: [206, 224], sat: 64, energy: 0.15, speed: 0.5, scale: 0.87, pulse: 0.06, pull: 0.9, halo: 0.32 },
+  calibrating: { hues: [202, 222], sat: 62, energy: 0.2, speed: 0.6, scale: 0.9, pulse: 0.07, pull: 1, halo: 0.38 },
+  standby: { hues: [206, 224], sat: 60, energy: 0.12, speed: 0.34, scale: 0.93, pulse: 0.028, pull: 1, halo: 0.3 },
+  voice_detected: { hues: [200, 220], sat: 66, energy: 0.26, speed: 0.68, scale: 0.96, pulse: 0.04, pull: 0.75, halo: 0.46 },
+  listening: { hues: [198, 218], sat: 68, energy: 0.34, speed: 0.8, scale: 1, pulse: 0.035, pull: 0.85, halo: 0.6 },
+  thinking: { hues: [45, 58], sat: 72, energy: 0.34, speed: 1.55, scale: 0.97, pulse: 0.07, pull: 0.55, halo: 0.5 },
+  speaking: { hues: [130, 155], sat: 62, energy: 0.38, speed: 1.0, scale: 1, pulse: 0.05, pull: 0.8, halo: 0.62 },
+  reconnecting: { hues: [210, 230], sat: 56, energy: 0.15, speed: 0.65, scale: 0.9, pulse: 0.09, pull: 1, halo: 0.32 },
+  error: { hues: [355, 10], sat: 60, energy: 0.14, speed: 0.28, scale: 0.85, pulse: 0.04, pull: 1, halo: 0.3 },
+  party: { hues: [0, 40], sat: 6, energy: 0.42, speed: 0.9, scale: 1.04, pulse: 0.09, pull: 0.6, halo: 0.75 },
 };
 
 function lerp(current: number, target: number, factor: number): number {
@@ -96,6 +100,24 @@ export default function HelionOrb({
   statusRef.current = status;
   const micUnavailableRef = useRef(micUnavailable);
   micUnavailableRef.current = micUnavailable;
+
+  // Modo "party" (blanco): estado especial activado a mano, no ligado a
+  // ningún evento del backend. Gesto oculto: 4 clics rápidos (<1.5s) sobre
+  // el propio orbe. Vuelve a repetirse el gesto para desactivarlo.
+  const [party, setParty] = useState(false);
+  const partyRef = useRef(false);
+  partyRef.current = party;
+  const partyClicksRef = useRef<number[]>([]);
+  const handlePartyGesture = () => {
+    const now = performance.now();
+    const recent = partyClicksRef.current.filter((ts) => now - ts < 1500);
+    recent.push(now);
+    partyClicksRef.current = recent;
+    if (recent.length >= 4) {
+      partyClicksRef.current = [];
+      setParty((current) => !current);
+    }
+  };
   // Suavizado persistente entre re-ejecuciones del efecto (sin saltos).
   const smoothRef = useRef({ energy: 0.05, scale: 0.8, hueA: 220, hueB: 254, sat: 62, pull: 1, level: 0 });
   // Pulso activo: {kind, startedAt} — se dibuja y se autocancela.
@@ -136,7 +158,7 @@ export default function HelionOrb({
 
       const t = timestamp / 1000;
       const current = statusRef.current;
-      const state = ORB_STATES[current] ?? ORB_STATES.idle;
+      const state = partyRef.current ? ORB_STATES.party : (ORB_STATES[current] ?? ORB_STATES.idle);
 
       // Nivel de audio, siempre suavizado (nunca literal ni parpadeante).
       let targetLevel = 0;
@@ -328,10 +350,11 @@ export default function HelionOrb({
       cancelAnimationFrame(rafId);
     };
     // Con reduce-motion se redibuja un frame estático por cambio de estado
-    // (incluye micUnavailable para que el anillo ámbar aparezca/desaparezca).
-  }, [micLevelRef, agentLevelRef, status, micUnavailable]);
+    // (incluye micUnavailable para que el anillo ámbar aparezca/desaparezca,
+    // y party para que el modo blanco se refleje al instante).
+  }, [micLevelRef, agentLevelRef, status, micUnavailable, party]);
 
-  const state = ORB_STATES[status] ?? ORB_STATES.idle;
+  const state = party ? ORB_STATES.party : (ORB_STATES[status] ?? ORB_STATES.idle);
   const haloHue = (state.hues[0] + state.hues[1]) / 2;
   const haloStyle: CSSProperties = {
     opacity: state.halo,
@@ -339,7 +362,12 @@ export default function HelionOrb({
   };
 
   return (
-    <div className="orb-stage" data-status={status}>
+    <div
+      className="orb-stage"
+      data-status={status}
+      data-party={party || undefined}
+      onClick={handlePartyGesture}
+    >
       <div className="orb-halo" style={haloStyle} aria-hidden />
       <canvas ref={canvasRef} className="orb-canvas" aria-hidden />
     </div>
