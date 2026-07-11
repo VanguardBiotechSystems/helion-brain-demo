@@ -84,6 +84,11 @@ export function buildRealtimeSessionConfig(
   if (env.transcriptionLanguage) {
     transcription.language = env.transcriptionLanguage;
   }
+  // Pista de contexto: ancla el idioma y los nombres propios frecuentes para
+  // que el STT no salte de alfabeto ni invente palabras sobre audio ruidoso.
+  if (env.transcriptionPrompt) {
+    transcription.prompt = env.transcriptionPrompt;
+  }
 
   // Con motor de voz externo (ElevenLabs), el modelo responde solo texto:
   // los oídos (VAD + transcripción) siguen siendo los de la sesión realtime,

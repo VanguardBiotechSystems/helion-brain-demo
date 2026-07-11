@@ -95,6 +95,8 @@ export interface AppEnv {
   transcriptionModel: string;
   /** ISO-639-1; cadena vacía = autodetección. */
   transcriptionLanguage: string;
+  /** Pista de contexto para el STT (idioma, nombres propios); "" = sin pista. */
+  transcriptionPrompt: string;
   textModel: string;
   accessPassword: string;
   /** Passcodes que abren la puerta (acceso, no identidad). */
@@ -429,6 +431,7 @@ export function readEnv(source: Record<string, string | undefined> = process.env
   const languageRaw = source.OPENAI_TRANSCRIPTION_LANGUAGE;
   const transcriptionLanguage =
     languageRaw === undefined ? "es" : languageRaw.trim().toLowerCase() === "auto" ? "" : languageRaw.trim();
+  const transcriptionPrompt = source.OPENAI_TRANSCRIPTION_PROMPT?.trim() ?? "";
 
   return {
     env: {
@@ -438,6 +441,7 @@ export function readEnv(source: Record<string, string | undefined> = process.env
       realtimeVoice: source.OPENAI_REALTIME_VOICE?.trim() || "cedar",
       transcriptionModel: source.OPENAI_TRANSCRIPTION_MODEL?.trim() || "gpt-4o-mini-transcribe",
       transcriptionLanguage,
+      transcriptionPrompt,
       textModel: source.OPENAI_TEXT_MODEL?.trim() || "gpt-4.1-mini",
       accessPassword,
       gatePasscodes: passcodes,

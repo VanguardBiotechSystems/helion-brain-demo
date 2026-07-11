@@ -37,6 +37,19 @@ describe("buildRealtimeSessionConfig", () => {
     expect(String(config.instructions)).toContain("voz externa");
   });
 
+  it("la transcripción fija idioma es e incluye la pista de contexto si se configura", () => {
+    const base = buildRealtimeSessionConfig(envFor());
+    const baseInput = (base.audio as { input: { transcription: Record<string, string> } }).input;
+    expect(baseInput.transcription.language).toBe("es");
+    expect(baseInput.transcription.prompt).toBeUndefined();
+
+    const withPrompt = buildRealtimeSessionConfig(
+      envFor({ OPENAI_TRANSCRIPTION_PROMPT: "Transcribe en español. Nombres: Helion, Juanma." }),
+    );
+    const promptInput = (withPrompt.audio as { input: { transcription: Record<string, string> } }).input;
+    expect(promptInput.transcription.prompt).toContain("Helion");
+  });
+
   it("las instrucciones exigen castellano de España en ambos modos", () => {
     for (const config of [
       buildRealtimeSessionConfig(envFor()),
