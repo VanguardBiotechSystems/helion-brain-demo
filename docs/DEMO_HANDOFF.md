@@ -25,7 +25,7 @@ gh repo create helion --private --source=. --push
    | `SESSION_SECRET` | `openssl rand -hex 32` |
    | `VOICE_ENGINE` | `elevenlabs` (modo demo actual) |
    | `ELEVENLABS_API_KEY` | tu clave de ElevenLabs |
-   | `ELEVENLABS_VOICE_ID` | `r8cXSGtllevsD7FGkMTx` (voz recomendada para la demo) |
+   | `ELEVENLABS_VOICE_ID` | `D7dkYvH17OKLgp4SLulf` (voz recomendada para la demo) |
    | `ELEVENLABS_TTS_MODE` | `http_stream` (recomendado en serverless) |
    | `ELEVENLABS_SPEED` | `1.08` |
    | `AUDIO_PROFILE` | `demo_balanced` |
@@ -134,4 +134,4 @@ npm run dev           # prueba local completa (voz, ruido, memoria)
 
 ## Escucha permanente y consola conversacional
 
-Helion escucha siempre pero **solo responde cuando se le habla a él** (di «Helion»; luego quedas unos segundos en modo atento). No responde a menciones en tercera persona. Si el micrófono falla, escribe en la consola de abajo. Detalle y variables `WAKE_*`/`TRANSCRIPT_*` en [WAKE_AND_TRANSCRIPT.md](WAKE_AND_TRANSCRIPT.md). Voz por defecto: ElevenLabs `r8cXSGtllevsD7FGkMTx`.
+Helion escucha siempre pero **solo responde cuando se le habla a él** (di «Helion»; luego quedas unos segundos en modo atento). No responde a menciones en tercera persona. Si el micrófono falla, escribe en la consola de abajo. Detalle y variables `WAKE_*`/`TRANSCRIPT_*` en [WAKE_AND_TRANSCRIPT.md](WAKE_AND_TRANSCRIPT.md). Voz por defecto: ElevenLabs `D7dkYvH17OKLgp4SLulf`.

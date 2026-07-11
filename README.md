@@ -51,7 +51,7 @@ Copia `.env.example` a `.env.local` y rellena los valores. Resumen:
 | `OPENAI_REALTIME_MODEL` | — | `gpt-realtime-2.1` | Modelo speech-to-speech. |
 | `OPENAI_REALTIME_VOICE` | — | `cedar` | Voz OpenAI (recomendadas masculina/juvenil: `cedar`, `ash`, `echo`, `verse`). |
 | `ELEVENLABS_API_KEY` | si `elevenlabs` | — | Clave de ElevenLabs (solo servidor). |
-| `ELEVENLABS_VOICE_ID` | si `elevenlabs` | `r8cXSGtllevsD7FGkMTx` | Voz recomendada para la demo (ElevenLabs). |
+| `ELEVENLABS_VOICE_ID` | si `elevenlabs` | `D7dkYvH17OKLgp4SLulf` | Voz recomendada para la demo (ElevenLabs). |
 | `ELEVENLABS_MODEL` | — | `eleven_flash_v2_5` | Modelo TTS de baja latencia. |
 | `ELEVENLABS_OUTPUT_FORMAT` | — | `mp3_44100_128` | Formato del audio generado. |
 | `AUDIO_PROFILE` | — | `demo_balanced` | Perfil de escucha: `demo_balanced`, `laptop_demo` (estricto), `near_field`, `far_field`, `robot_room`. |
@@ -169,7 +169,7 @@ En este modo, los **oídos y el cerebro siguen siendo OpenAI Realtime** (misma d
    ```
    VOICE_ENGINE=elevenlabs
    ELEVENLABS_API_KEY=tu-clave
-   ELEVENLABS_VOICE_ID=r8cXSGtllevsD7FGkMTx   # voz recomendada para la demo
+   ELEVENLABS_VOICE_ID=D7dkYvH17OKLgp4SLulf   # voz recomendada para la demo
    ```
 6. Reinicia/redespliega y **prueba antes de la demo**: panel de diagnóstico 🔧 → **«▶ Probar voz española»** (o abre `/api/voice/test` con la sesión iniciada). Oirás: *"Hola, soy Helion. Esta es una prueba de voz en español de España…"*. La prueba funciona aunque el motor activo siga siendo `openai_realtime`, para validar la voz antes de cambiar.
 
