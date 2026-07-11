@@ -7,7 +7,7 @@ import {
 } from "@/lib/server/access";
 import { getProfileById, matchGatePasscode } from "@/lib/server/profiles";
 import { readEnv } from "@/lib/server/env";
-import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
+import { clientIpFrom, enforceRateLimit } from "@/lib/server/rateLimit";
 import { logError, logInfo } from "@/lib/server/log";
 
 export const dynamic = "force-dynamic";
@@ -50,8 +50,7 @@ export async function POST(request: NextRequest) {
   }
 
   const ip = clientIpFrom(request.headers);
-  const limiter = getLimiter("login", 10, 15 * 60 * 1000);
-  const { allowed, retryAfterMs } = limiter.check(ip);
+  const { allowed, retryAfterMs } = enforceRateLimit("login", `ip:${ip}`);
   if (!allowed) {
     return NextResponse.json(
       { error: { code: "rate_limited", message: "Demasiados intentos. Espera unos minutos." } },

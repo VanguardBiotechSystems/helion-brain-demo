@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
  * gestión de memoria; admite dryRun para previsualizar.
  */
 export async function POST(request: NextRequest) {
-  const guard = requireAccess(request, { limiter: { name: "memory-extract", limit: 10, windowMs: 600000 } });
+  const guard = requireAccess(request, { limiter: { name: "consolidate", limit: 10, windowMs: 600000 } });
   if (!guard.ok) return guard.response;
   if (!guard.env.memory.enabled) return memoryDisabledResponse();
   if (!guard.profile.canManageMemory || guard.identityStatus !== "confirmed") {

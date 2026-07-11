@@ -3,7 +3,7 @@ import { ACCESS_COOKIE, verifyAccessToken } from "@/lib/server/access";
 import { readEnv } from "@/lib/server/env";
 import { getProfileById } from "@/lib/server/profiles";
 import { getTtsProvider } from "@/lib/server/tts";
-import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
+import { clientIpFrom, enforceRateLimit } from "@/lib/server/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
   }
 
   const ip = clientIpFrom(request.headers);
-  const { allowed, retryAfterMs } = getLimiter("voice-test", 10, 10 * 60 * 1000).check(ip);
+  const { allowed, retryAfterMs } = enforceRateLimit("voice-test", `ip:${ip}`);
   if (!allowed) {
     return NextResponse.json(
       { error: { code: "rate_limited", message: "Demasiadas pruebas de voz en poco tiempo." } },

@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * un solo uso (sin replay). Requiere identidad no-desconocida.
  */
 export async function POST(request: NextRequest) {
-  const guard = requireAccess(request, { limiter: { name: "memory-write", limit: 60, windowMs: 600000 } });
+  const guard = requireAccess(request, { limiter: { name: "memory-confirm", limit: 60, windowMs: 600000 } });
   if (!guard.ok) return guard.response;
   if (!guard.env.memory.enabled) return memoryDisabledResponse();
   if (guard.identityStatus === "unknown") {

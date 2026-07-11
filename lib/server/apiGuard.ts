@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, verifyAccessToken } from "./access";
 import { readEnv, type AppEnv } from "./env";
 import { getProfileById, type AccessProfile, type IdentityStatus } from "./profiles";
-import { clientIpFrom, getLimiter } from "./rateLimit";
+import { clientIpFrom, enforceRateLimit, getLimiter, RATE_LIMITS, type RateLimitNamespace } from "./rateLimit";
 
 /**
  * Guard común para endpoints autenticados: entorno válido, cookie firmada
@@ -53,7 +53,12 @@ export function requireAccess(request: NextRequest, options: GuardOptions = {}):
   if (options.limiter) {
     const key = token ? `tk:${token.slice(-24)}` : `ip:${clientIpFrom(request.headers)}`;
     const { name, limit, windowMs } = options.limiter;
-    const { allowed, retryAfterMs } = getLimiter(name, limit, windowMs).check(key);
+    // Namespace conocido → tabla central (límites diferenciados, métricas de
+    // bloqueo, sin colisiones). Nombre desconocido → límite ad-hoc heredado.
+    const { allowed, retryAfterMs } =
+      name in RATE_LIMITS
+        ? enforceRateLimit(name as RateLimitNamespace, key)
+        : getLimiter(name, limit, windowMs).check(key);
     if (!allowed) {
       return {
         ok: false,

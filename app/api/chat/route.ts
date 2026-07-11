@@ -4,7 +4,7 @@ import { readEnv } from "@/lib/server/env";
 import { getProfileById } from "@/lib/server/profiles";
 import { buildTextFallbackInstructions } from "@/lib/server/personality";
 import { mapOpenAiFailure } from "@/lib/server/realtime";
-import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
+import { clientIpFrom, enforceRateLimit } from "@/lib/server/rateLimit";
 import { logError } from "@/lib/server/log";
 
 export const dynamic = "force-dynamic";
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   }
 
   const ip = clientIpFrom(request.headers);
-  const { allowed, retryAfterMs } = getLimiter("chat", 30, 10 * 60 * 1000).check(ip);
+  const { allowed, retryAfterMs } = enforceRateLimit("chat", `ip:${ip}`);
   if (!allowed) {
     return NextResponse.json(
       { error: { code: "rate_limited", message: "Demasiados mensajes en poco tiempo." } },

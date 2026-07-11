@@ -3,7 +3,7 @@ import { ACCESS_COOKIE, verifyAccessToken } from "@/lib/server/access";
 import { readEnv } from "@/lib/server/env";
 import { getProfileById } from "@/lib/server/profiles";
 import { clampTtsText, getTtsProvider } from "@/lib/server/tts";
-import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
+import { clientIpFrom, enforceRateLimit } from "@/lib/server/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
   // NAT no se roban la cuota, y una conversación fluida (una síntesis por
   // turno) cabe de sobra en el límite.
   const limiterKey = token ? `tk:${token.slice(-24)}` : `ip:${clientIpFrom(request.headers)}`;
-  const { allowed, retryAfterMs } = getLimiter("tts", 120, 10 * 60 * 1000).check(limiterKey);
+  const { allowed, retryAfterMs } = enforceRateLimit("tts", limiterKey);
   if (!allowed) {
     return NextResponse.json(
       { error: { code: "rate_limited", message: "Demasiadas peticiones de voz en poco tiempo." } },
