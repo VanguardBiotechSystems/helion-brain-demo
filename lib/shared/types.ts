@@ -133,6 +133,8 @@ export interface SessionResponse {
   wake?: WakeClientConfig;
   ui?: UiClientConfig;
   tts?: TtsClientConfig;
+  /** Interlocutor firmado por el servidor (para el guard de reinicio idempotente). */
+  profile?: { id: string; displayName: string; role: string; identityStatus?: string };
 }
 
 export interface WakeClientConfig {

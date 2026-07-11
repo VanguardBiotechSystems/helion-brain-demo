@@ -334,6 +334,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   // Cambio de identidad conversacional: al terminar la respuesta en curso
   // se reinicia la sesión para reconstruir contexto y memoria autorizada.
   const identityRestartRef = useRef(false);
+  // Firma "id:status" de la identidad ya aplicada a la sesión viva. El guard
+  // de reinicio la usa para NO reconectar cuando identity_set re-confirma la
+  // MISMA identidad (el owner sin PIN resuelve siempre a "claimed"): sin esto,
+  // cada confirmación dispara restart → la nueva sesión repregunta → bucle.
+  const appliedIdentityRef = useRef<string>("");
   const logRef = useRef(log);
 
   logRef.current = log;
@@ -1004,33 +1009,50 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           });
           const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
           if (response.ok && (body?.ok as boolean)) {
-            // Identidad cambiada: reconstruir contexto al acabar de hablar.
-            identityRestartRef.current = true;
-            injectedMemoryIdsRef.current.clear();
-            setLastRecall([]);
-            // PRIVACIDAD (auditoría bloque 4): la reconstrucción normal ocurre
-            // al terminar el audio, pero si el modelo no vuelve a hablar, los
-            // recuerdos privados ya inyectados en la sesión viva NO deben
-            // quedarse. Un temporizador de respaldo fuerza el reinicio pronto.
-            if (identityRestartTimerRef.current) clearTimeout(identityRestartTimerRef.current);
-            identityRestartTimerRef.current = setTimeout(() => {
-              identityRestartTimerRef.current = null;
-              if (identityRestartRef.current) {
-                identityRestartRef.current = false;
-                void restartRef.current();
-              }
-            }, 2000);
-            // PRIVACIDAD: descarta los turnos aún sin extraer de la identidad
-            // ANTERIOR. Si no, la extracción posterior (que usa la cookie ya
-            // cambiada) los guardaría atribuidos a la NUEVA identidad → fuga.
-            exchangesRef.current = [];
-            extractWatermarkRef.current = 0;
-            // Barrido visual: Helion cierra un contexto y abre otro. No
-            // muestra datos del perfil anterior (es solo un gesto del orbe).
-            identitySwitchesRef.current += 1;
-            firePulse("identity");
-            output = { ...body, note: "Identidad actualizada; el contexto se reconstruirá ahora mismo." };
-            logRef.current.addSystem("Identidad de sesión actualizada. Reconstruyendo contexto…");
+            // ¿Cambió de verdad el interlocutor? Comparamos la firma id:status
+            // resuelta con la ya aplicada a la sesión viva. Re-confirmar la
+            // MISMA identidad (caso típico del owner sin PIN, que siempre
+            // resuelve a "claimed") NO debe reiniciar: si lo hiciera, la nueva
+            // sesión repreguntaría y se entraría en bucle infinito. Un reset
+            // siempre cuenta como cambio.
+            const nextId = String((body?.profile as { id?: string } | undefined)?.id ?? "");
+            const nextStatus = String(body?.identityStatus ?? "");
+            const nextSig = `${nextId}:${nextStatus}`;
+            const changed = name === IDENTITY_TOOL_NAMES.reset || nextSig !== appliedIdentityRef.current;
+            appliedIdentityRef.current = nextSig;
+            if (changed) {
+              // Cambio real (o reset): reconstruir contexto al acabar de hablar.
+              identityRestartRef.current = true;
+              injectedMemoryIdsRef.current.clear();
+              setLastRecall([]);
+              // PRIVACIDAD (auditoría bloque 4): la reconstrucción normal ocurre
+              // al terminar el audio, pero si el modelo no vuelve a hablar, los
+              // recuerdos privados ya inyectados en la sesión viva NO deben
+              // quedarse. Un temporizador de respaldo fuerza el reinicio pronto.
+              if (identityRestartTimerRef.current) clearTimeout(identityRestartTimerRef.current);
+              identityRestartTimerRef.current = setTimeout(() => {
+                identityRestartTimerRef.current = null;
+                if (identityRestartRef.current) {
+                  identityRestartRef.current = false;
+                  void restartRef.current();
+                }
+              }, 2000);
+              // PRIVACIDAD: descarta los turnos aún sin extraer de la identidad
+              // ANTERIOR. Si no, la extracción posterior (que usa la cookie ya
+              // cambiada) los guardaría atribuidos a la NUEVA identidad → fuga.
+              exchangesRef.current = [];
+              extractWatermarkRef.current = 0;
+              // Barrido visual: Helion cierra un contexto y abre otro. No
+              // muestra datos del perfil anterior (es solo un gesto del orbe).
+              identitySwitchesRef.current += 1;
+              firePulse("identity");
+              output = { ...body, note: "Identidad actualizada; el contexto se reconstruirá ahora mismo." };
+              logRef.current.addSystem("Identidad de sesión actualizada. Reconstruyendo contexto…");
+            } else {
+              // Misma identidad re-confirmada: sin reinicio (esto rompe el bucle).
+              identityRestartRef.current = false;
+              output = { ...body, note: "Identidad confirmada; sin cambios." };
+            }
           } else {
             output = body ?? { ok: false };
           }
@@ -1444,6 +1466,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         memoryEnabledRef.current = session.memory?.enabled ?? false;
         memoryAutoSaveRef.current = session.memory?.autoSave ?? false;
         setMemoryEnabled(memoryEnabledRef.current);
+        // Semilla de la identidad viva: el guard de reinicio compara contra
+        // esto para distinguir un cambio real de una re-confirmación inocua.
+        appliedIdentityRef.current = `${session.profile?.id ?? ""}:${session.profile?.identityStatus ?? ""}`;
         setSessionInfo({
           model: session.model,
           voice: session.voice,

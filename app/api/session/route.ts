@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
       enabled: env.memory.enabled,
       autoSave: env.memory.autoSave,
     },
-    profile: { id: profile.id, displayName: profile.displayName, role: profile.role },
+    profile: { id: profile.id, displayName: profile.displayName, role: profile.role, identityStatus },
     wake: {
       mode: env.wake.mode,
       agentNames: env.wake.agentNames,
