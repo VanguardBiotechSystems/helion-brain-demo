@@ -63,8 +63,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const body = (await request.json().catch(() => null)) as { messages?: unknown } | null;
-  const messages = sanitizeMessages(body?.messages);
+  // Tope de tamaño ANTES de parsear: evita DoS por agotamiento de memoria.
+  const raw = await request.text();
+  if (raw.length > 64_000) {
+    return NextResponse.json({ error: { code: "unknown", message: "Mensaje demasiado grande." } }, { status: 413 });
+  }
+  let parsed: { messages?: unknown } | null = null;
+  try {
+    parsed = raw ? (JSON.parse(raw) as { messages?: unknown }) : null;
+  } catch {
+    parsed = null;
+  }
+  const messages = sanitizeMessages(parsed?.messages);
   if (!messages) {
     return NextResponse.json(
       { error: { code: "unknown", message: "Formato de mensajes no válido." } },

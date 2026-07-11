@@ -3,6 +3,7 @@ import { ACCESS_COOKIE, ACCESS_TTL_MS, createAccessToken } from "@/lib/server/ac
 import { requireAccess } from "@/lib/server/apiGuard";
 import { logInfo } from "@/lib/server/log";
 import { matchProfileByAlias, ownerPinMatches, slugifyProfileId, getProfileById } from "@/lib/server/profiles";
+import { can } from "@/lib/server/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -50,8 +51,14 @@ export async function POST(request: NextRequest) {
     }
     // Sin PIN configurado: modo demo (warning visible en debug).
   }
-  if (profile.role !== "owner") status = profile.id === "guest" ? "guest" : "confirmed";
-  else if (!env.identity.ownerPin) status = "claimed"; // owner sin PIN: nunca "confirmed"
+  if (profile.role !== "owner") {
+    // SEGURIDAD (bloque 4): alias adivinable no abre memoria privada de otro.
+    if (profile.id === "guest") status = "guest";
+    else if (can(profile, "confirmed", "read_private_memory")) status = "claimed";
+    else status = "confirmed";
+  } else if (!env.identity.ownerPin) {
+    status = "claimed";
+  }
 
   logInfo("identity", `Identidad de sesión → ${profile.id} (${status})`);
   const response = NextResponse.json({

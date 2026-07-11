@@ -4,6 +4,7 @@ import { requireAccess } from "@/lib/server/apiGuard";
 import { logError, logInfo } from "@/lib/server/log";
 import { getMemoryStore } from "@/lib/server/memory/service";
 import { matchProfileByAlias, ownerPinMatches, slugifyProfileId, getProfileById } from "@/lib/server/profiles";
+import { can } from "@/lib/server/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -51,8 +52,17 @@ export async function POST(request: NextRequest) {
     }
     // Sin PIN configurado: modo demo (warning visible en debug).
   }
-  if (profile.role !== "owner") status = profile.id === "guest" ? "guest" : "confirmed";
-  else if (!env.identity.ownerPin) status = "claimed"; // owner sin PIN: nunca "confirmed"
+  if (profile.role !== "owner") {
+    // SEGURIDAD (bloque 4): un alias adivinable ("soy Sergio") NO basta para
+    // abrir la memoria privada/de proyecto de otro perfil. Los perfiles con
+    // acceso privado quedan "claimed" (sugerido: solo público/demo) hasta un
+    // factor extra; los que no tienen nada privado sí se confirman por alias.
+    if (profile.id === "guest") status = "guest";
+    else if (can(profile, "confirmed", "read_private_memory")) status = "claimed";
+    else status = "confirmed";
+  } else if (!env.identity.ownerPin) {
+    status = "claimed"; // owner sin PIN: nunca "confirmed"
+  }
 
   // Ciclo de vida: registra el uso del perfil (creación/último uso). Nunca
   // debe romper la resolución de identidad.

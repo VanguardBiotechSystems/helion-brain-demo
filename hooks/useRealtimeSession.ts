@@ -284,6 +284,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   const connectingRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Temporizador de estabilidad: reinicia el contador de reconexiones solo
+  // tras una conexión estable (anti-flapping).
+  const stableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Respaldo para forzar el reinicio por cambio de identidad si no llega el evento de audio.
+  const identityRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const speechStoppedAtRef = useRef<number | null>(null);
   const processedCallsRef = useRef(new Set<string>());
@@ -399,6 +404,14 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     if (connectTimeoutRef.current) {
       clearTimeout(connectTimeoutRef.current);
       connectTimeoutRef.current = null;
+    }
+    if (stableTimerRef.current) {
+      clearTimeout(stableTimerRef.current);
+      stableTimerRef.current = null;
+    }
+    if (identityRestartTimerRef.current) {
+      clearTimeout(identityRestartTimerRef.current);
+      identityRestartTimerRef.current = null;
     }
     const dc = dcRef.current;
     dcRef.current = null;
@@ -901,6 +914,18 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
             identityRestartRef.current = true;
             injectedMemoryIdsRef.current.clear();
             setLastRecall([]);
+            // PRIVACIDAD (auditoría bloque 4): la reconstrucción normal ocurre
+            // al terminar el audio, pero si el modelo no vuelve a hablar, los
+            // recuerdos privados ya inyectados en la sesión viva NO deben
+            // quedarse. Un temporizador de respaldo fuerza el reinicio pronto.
+            if (identityRestartTimerRef.current) clearTimeout(identityRestartTimerRef.current);
+            identityRestartTimerRef.current = setTimeout(() => {
+              identityRestartTimerRef.current = null;
+              if (identityRestartRef.current) {
+                identityRestartRef.current = false;
+                void restartRef.current();
+              }
+            }, 2000);
             // PRIVACIDAD: descarta los turnos aún sin extraer de la identidad
             // ANTERIOR. Si no, la extracción posterior (que usa la cookie ya
             // cambiada) los guardaría atribuidos a la NUEVA identidad → fuga.
@@ -1122,6 +1147,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
           setStatusSafe(deriveReadyStatus());
           if (identityRestartRef.current) {
             identityRestartRef.current = false;
+            if (identityRestartTimerRef.current) { clearTimeout(identityRestartTimerRef.current); identityRestartTimerRef.current = null; }
             void restartRef.current();
           }
           break;
@@ -1376,7 +1402,15 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         dc.onopen = () => {
           if (dcRef.current !== dc) return;
           setDataChannelState("open");
-          reconnectAttemptsRef.current = 0;
+          // Anti-flapping (auditoría bloque 4): NO reiniciar el contador de
+          // reconexiones al instante — un canal que abre y cierra en bucle
+          // reiniciaría el backoff sin fin. Solo se reinicia tras N segundos
+          // de conexión ESTABLE.
+          if (stableTimerRef.current) clearTimeout(stableTimerRef.current);
+          stableTimerRef.current = setTimeout(() => {
+            reconnectAttemptsRef.current = 0;
+            stableTimerRef.current = null;
+          }, 10_000);
           const ready = deriveReadyStatus();
           statusRef.current = ready;
           setStatus(ready);

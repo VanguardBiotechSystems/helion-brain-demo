@@ -23,6 +23,12 @@ const DENY_KEYS: string[] = [
   "content", "canonicalcontent", "memory", "memoria", "recuerdo", "recall", "audio",
   "displayname", "alias", "toolargs", "tooloutput", "arguments", "dsn", "databaseurl",
   "connectionstring", "authtoken", "bearer",
+  // Ampliación (auditoría bloque 4): nombres comunes de contenido/PII que se
+  // colaban por no estar en la lista.
+  "name", "fullname", "username", "message", "text", "response", "reply", "answer",
+  "question", "utterance", "output", "input", "phone", "tel", "telefono", "address",
+  "direccion", "ip", "geo", "location", "ubicacion", "note", "notes", "nota", "title",
+  "titulo", "query", "body",
 ];
 
 // Patrones por VALOR (aunque la clave sea benigna o sea texto suelto).
@@ -36,6 +42,14 @@ const VALUE_PATTERNS: RegExp[] = [
   /postgres(ql)?:\/\/[^\s"']+/gi, // connection strings
   /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/g, // JWT
   /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, // emails
+  // Ampliación (auditoría bloque 4): más credenciales y PII habituales.
+  /\bAKIA[0-9A-Z]{16}\b/g, // AWS access key id
+  /\bAIza[0-9A-Za-z_-]{35}\b/g, // Google API key
+  /\bghp_[A-Za-z0-9]{20,}\b/g, // GitHub token
+  /\b\d{3}-\d{2}-\d{4}\b/g, // SSN
+  /\b(?:\d[ -]?){13,16}\b/g, // tarjetas (grupos de dígitos)
+  /\b(?:\+?\d{1,3}[ -]?)?(?:\(?\d{2,4}\)?[ -]?){2,4}\d{2,4}\b/g, // teléfonos
+  /\b(?:\d{1,3}\.){3}\d{1,3}\b/g, // IPv4
 ];
 
 const MAX_STRING = 500;
@@ -67,9 +81,12 @@ export function scrubUrl(raw: string): string {
   try {
     const url = new URL(raw);
     url.search = "";
+    url.hash = ""; // el fragmento puede llevar tokens (OAuth implicit, etc.)
     url.username = "";
     url.password = "";
-    return url.toString();
+    // Aun sin query/hash, host/ruta podrían contener un patrón de secreto:
+    // se pasa el resultado por el saneador de valores.
+    return scrubString(url.toString());
   } catch {
     return scrubString(raw);
   }

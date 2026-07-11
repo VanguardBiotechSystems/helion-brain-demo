@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { gatePasscodes, resolveProfiles, type AccessProfile } from "./profiles";
 
 /**
@@ -222,10 +222,23 @@ const AUDIO_PROFILES: Record<AudioProfile, AudioProfilePreset> = {
   },
 };
 
-function deriveFallbackSecret(accessPassword: string): string {
-  // Derivación determinista para poder firmar cookies sin SESSION_SECRET.
-  // Menos robusto que un secreto independiente: se documenta en README.
-  return createHash("sha256").update(`helion-session-v1:${accessPassword}`).digest("hex");
+/**
+ * Secreto de firma de cookies cuando NO se define SESSION_SECRET.
+ *
+ * SEGURIDAD (bloque 4, auditoría): NUNCA derivar el secreto del passcode —
+ * el passcode lo conocen todos los usuarios de la puerta y el algoritmo está
+ * en el código, así que cualquiera podría forjar una cookie owner+confirmed y
+ * saltarse el PIN. En su lugar se genera un secreto ALEATORIO de alta entropía
+ * una vez por proceso (cacheado en globalThis): imposible de forjar. Coste:
+ * las cookies no sobreviven a un reinicio del proceso (los usuarios reentran
+ * con el passcode). Para sesiones persistentes, define SESSION_SECRET.
+ */
+const secretStore = globalThis as unknown as { __helionFallbackSecret?: string };
+function getProcessFallbackSecret(): string {
+  if (!secretStore.__helionFallbackSecret) {
+    secretStore.__helionFallbackSecret = randomBytes(32).toString("hex");
+  }
+  return secretStore.__helionFallbackSecret;
 }
 
 function parseNumber(raw: string | undefined, fallback: number, min: number, max: number): number {
@@ -387,8 +400,6 @@ export function readEnv(source: Record<string, string | undefined> = process.env
 
   const openaiApiKey = source.OPENAI_API_KEY!.trim();
   const accessPassword = source.APP_ACCESS_PASSWORD?.trim() ?? "";
-  // Semilla del secreto de sesión derivado: el conjunto de passcodes.
-  const secretSeed = passcodes.join("|");
 
   const languageRaw = source.OPENAI_TRANSCRIPTION_LANGUAGE;
   const transcriptionLanguage =
@@ -414,7 +425,7 @@ export function readEnv(source: Record<string, string | undefined> = process.env
         ownerPin: source.OWNER_IDENTITY_PIN?.trim() ?? "",
         allowDynamicProfiles: parseBoolean(source.IDENTITY_ALLOW_DYNAMIC_PROFILES, true),
       },
-      sessionSecret: source.SESSION_SECRET?.trim() || deriveFallbackSecret(secretSeed),
+      sessionSecret: source.SESSION_SECRET?.trim() || getProcessFallbackSecret(),
       agentName: source.AGENT_NAME?.trim() || "Atlas",
       appName: source.NEXT_PUBLIC_APP_NAME?.trim() || "Helion",
       voiceEngine,

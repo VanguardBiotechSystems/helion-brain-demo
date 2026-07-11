@@ -73,3 +73,25 @@ describe("scrubber de observabilidad (bloque 3 §1/§13)", () => {
     expect((scrubString(big)).length).toBeLessThan(600);
   });
 });
+
+describe("scrubber — endurecimiento auditoría bloque 4", () => {
+  it("redacta claves de contenido/PII habituales (name, message, text, note)", () => {
+    const out = scrub({ name: "Juanma López", message: "hola qué tal hoy", text: "algo privado", note: "recordatorio" }) as Record<string, string>;
+    expect(out.name).toBe(REDACTED);
+    expect(out.message).toBe(REDACTED);
+    expect(out.text).toBe(REDACTED);
+    expect(out.note).toBe(REDACTED);
+  });
+
+  it("redacta SSN, AWS/Google keys e IPv4 en valores sueltos", () => {
+    expect(scrubString("ssn 123-45-6789")).toContain(REDACTED);
+    expect(scrubString("key AKIAIOSFODNN7EXAMPLE")).toContain(REDACTED);
+    expect(scrubString("ip 192.168.1.42 conectó")).toContain(REDACTED);
+  });
+
+  it("scrubUrl elimina también el fragmento (#token) y sanea el resto", () => {
+    const out = scrubUrl("https://h/callback#access_token=abc123&x=1");
+    expect(out).not.toContain("access_token");
+    expect(out).not.toContain("abc123");
+  });
+})

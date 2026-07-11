@@ -36,7 +36,8 @@ export async function POST(request: NextRequest) {
   const category = CATEGORIES.includes(body?.category as ObservabilityCategory)
     ? (body?.category as ObservabilityCategory)
     : "client";
-  const message = typeof body?.message === "string" ? body.message.slice(0, 300) : "error de cliente";
+  // Mensaje libre acotado y SANEADO por captureError (scrub): no se confía.
+  const message = typeof body?.message === "string" ? body.message.slice(0, 160) : "error de cliente";
   const browser = typeof body?.browser === "string" ? body.browser.slice(0, 16) : undefined;
   const phase = typeof body?.phase === "string" ? body.phase.slice(0, 24) : undefined;
   const correlationId = typeof body?.correlationId === "string" ? body.correlationId.slice(0, 40) : undefined;

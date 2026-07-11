@@ -103,7 +103,13 @@ export async function POST(request: NextRequest) {
   const identityBlock = buildIdentityBlock(identityStatus, profile, pinNote);
   let selfKnowledgeBlock = "";
   if (env.memory.selfKnowledgeEnabled) {
-    const health = await getMemoryHealth(env).catch(() => null);
+    // getMemoryHealth NO debe volver al camino crítico sin presupuesto: se
+    // corre con el mismo tope de bloqueo que el contexto de memoria y, si
+    // tarda, se asume no persistente (Helion lo dirá con honestidad).
+    const health = await Promise.race([
+      getMemoryHealth(env).catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), env.memory.maxBlockingMs)),
+    ]);
     selfKnowledgeBlock = buildSelfKnowledgeBlock(env, health?.persistent ?? false);
   }
 

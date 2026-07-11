@@ -147,6 +147,12 @@ export class PostgresMemoryStore implements MemoryStore {
       connectionString: databaseUrl,
       max: 3,
       ssl: /sslmode=require|supabase|neon/i.test(databaseUrl) ? { rejectUnauthorized: false } : undefined,
+      // Timeouts DUROS (auditoría bloque 4): una BD colgada NO debe bloquear
+      // indefinidamente el camino de sesión. Falla rápido y se degrada honesto.
+      connectionTimeoutMillis: 2000,
+      idleTimeoutMillis: 10_000,
+      statement_timeout: 3000,
+      query_timeout: 3000,
     });
   }
 

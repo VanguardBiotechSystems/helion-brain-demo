@@ -82,6 +82,9 @@ const MIN = 60_000;
 export const RATE_LIMITS = {
   // Autenticación y acceso (protegen contra fuerza bruta y enumeración).
   login: { limit: 10, windowMs: 15 * MIN },
+  // Red de seguridad IP-INDEPENDIENTE contra brute force con IP spoofeada:
+  // un tope global de intentos de acceso por ventana.
+  "login-global": { limit: 100, windowMs: 15 * MIN },
   access_pin: { limit: 8, windowMs: 15 * MIN },
   identity: { limit: 30, windowMs: 10 * MIN },
   // Sesión y voz (protegen la factura).
@@ -192,12 +195,21 @@ export function rateLimiterReadiness(source: Record<string, string | undefined> 
   };
 }
 
-/** Extrae la IP del cliente detrás de proxies (Vercel/Render/Railway). */
+/**
+ * Extrae la IP del cliente detrás de proxies. SEGURIDAD (bloque 4): el
+ * PRIMER valor de X-Forwarded-For es controlable por el cliente (los proxies
+ * lo APENDEAN), así que un atacante podría rotarlo para evadir el rate limit.
+ * Por eso se prefiere `x-real-ip` (lo fija la plataforma, valor único) y solo
+ * como último recurso el XFF. Aun así, los límites sensibles (login) tienen
+ * ADEMÁS un tope global independiente de IP como red de seguridad.
+ */
 export function clientIpFrom(headers: Headers): string {
+  const realIp = headers.get("x-real-ip")?.trim();
+  if (realIp) return realIp;
   const forwarded = headers.get("x-forwarded-for");
   if (forwarded) {
     const first = forwarded.split(",")[0]?.trim();
     if (first) return first;
   }
-  return headers.get("x-real-ip")?.trim() || "unknown";
+  return "unknown";
 }
