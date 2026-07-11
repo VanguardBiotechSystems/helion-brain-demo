@@ -24,11 +24,11 @@ Pregunta con quién hablas ("¿con quién hablo?"). Al identificarse, identity_s
   }
   const suggested = status === "claimed" || status === "guest";
   if (suggested) {
-    const ownerPin = profile.role === "owner" ? " (owner: pídele el PIN)" : "";
+    const ownerPin = profile.role === "owner" ? " Para lo privado, pídele antes el PIN." : "";
     return `
 
-# Interlocutor: PROBABLE ${profile.displayName} (sin confirmar)
-Quizá es ${profile.displayName}; no lo des por seguro: pregúntalo ("¿Sigues siendo tú, ${profile.displayName}?") y confírmalo con identity_set${ownerPin}. Hasta confirmar: solo público, nada privado.${pinNote}`;
+# Interlocutor: probablemente ${profile.displayName}
+Salúdale por su nombre; no preguntes "¿sigues siendo tú?". Solo si dice ser OTRA persona → identity_set. Hasta confirmar: nada privado, solo público.${ownerPin}${pinNote}`;
   }
   return `
 

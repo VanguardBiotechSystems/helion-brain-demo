@@ -95,7 +95,7 @@ describe("presupuesto de prompt medido contra bloques reales (P2)", () => {
     const prof = { displayName: "Juanma", role: "owner" as const };
     const unknown = buildIdentityBlock("unknown", prof, " (owner sin PIN configurado: modo demo)");
     expect(unknown).toContain("DESCONOCIDO");
-    expect(buildIdentityBlock("claimed", prof, "")).toContain("sin confirmar");
+    expect(buildIdentityBlock("claimed", prof, "")).toContain("probablemente");
     expect(buildIdentityBlock("confirmed", prof, "")).toContain("Hablas con Juanma");
   });
 });
