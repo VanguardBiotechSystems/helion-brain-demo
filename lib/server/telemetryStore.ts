@@ -157,8 +157,30 @@ export function telemetrySummary(limitDays = 14): Array<Omit<DailyAggregate, "la
     }));
 }
 
+/** Uso agregado de un día (para control de coste). */
+export function usageForDay(dayIso: string): { sessions: number; totalSessionMs: number; longSessions: number } {
+  const agg = days().get(dayIso);
+  return {
+    sessions: agg?.sessions ?? 0,
+    totalSessionMs: agg?.totalSessionMs ?? 0,
+    longSessions: agg?.longSessions ?? 0,
+  };
+}
+
+/** Cuenta de sesiones arrancadas hoy, independiente de la telemetría de fin
+ * de sesión (que puede no llegar). Se incrementa al crear cada sesión. */
+const sessionCounter = globalThis as unknown as { __helionSessionsStarted?: Record<string, number> };
+export function recordSessionStarted(dayIso: string): void {
+  const map = (sessionCounter.__helionSessionsStarted ??= {});
+  map[dayIso] = (map[dayIso] ?? 0) + 1;
+}
+export function sessionsStartedToday(dayIso: string): number {
+  return sessionCounter.__helionSessionsStarted?.[dayIso] ?? 0;
+}
+
 /** Solo para tests: limpia el estado global. */
 export function __resetTelemetry(): void {
+  sessionCounter.__helionSessionsStarted = {};
   store.__helionTelemetry = new Map();
   store.__helionTelemetrySeen = new Set();
   store.__helionTelemetryRejected = 0;

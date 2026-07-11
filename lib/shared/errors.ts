@@ -21,6 +21,14 @@ export type ErrorCode =
   | "webrtc_failed"
   | "openai_error"
   | "tts_failed"
+  | "mic_lost"
+  | "memory_unavailable"
+  | "identity_unconfirmed"
+  | "usage_limited"
+  | "provider_openai_down"
+  | "provider_elevenlabs_down"
+  | "streaming_fallback"
+  | "text_fallback"
   | "unknown";
 
 export interface AppError {
@@ -93,6 +101,41 @@ export const ERROR_COPY: Record<ErrorCode, { message: string; hint?: string }> =
   tts_failed: {
     message: "No se pudo generar la voz española externa.",
     hint: "Revisa ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID y la cuota de tu cuenta de ElevenLabs.",
+  },
+  // Fallbacks honestos (§8): mensajes breves en el tono de Helion, sin jerga
+  // técnica ni frases falsas de "todo funciona". La consola privada muestra el
+  // código y la causa; el usuario solo ve esto.
+  mic_lost: {
+    message: "Me he quedado sin oído: el micrófono ha dejado de estar disponible.",
+    hint: "Revisa el micrófono o los permisos y vuelve a conectar. Mientras, puedes escribirme.",
+  },
+  memory_unavailable: {
+    message: "Ahora mismo no llego a mi memoria, así que hablo sin recordar lo anterior.",
+    hint: "Puedes seguir hablando; la memoria volverá cuando el almacén responda.",
+  },
+  identity_unconfirmed: {
+    message: "Antes de abrir nada tuyo necesito confirmar quién eres.",
+    hint: "Dime tu nombre; si eres el owner, tendré que pedirte el PIN.",
+  },
+  usage_limited: {
+    message: "Por hoy toca parar aquí: se ha alcanzado el límite de uso.",
+    hint: "Vuelve a intentarlo más tarde. El owner puede ampliar el límite si hace falta.",
+  },
+  provider_openai_down: {
+    message: "Ahora mismo no puedo pensar con normalidad. Reinténtalo en un momento.",
+    hint: "El servicio de voz/razonamiento no responde. Puedes usar el modo texto mientras tanto.",
+  },
+  provider_elevenlabs_down: {
+    message: "Te sigo entendiendo, pero mi voz de calidad no está disponible ahora.",
+    hint: "Sigo respondiendo con la voz estable; la voz de calidad volverá cuando el proveedor responda.",
+  },
+  streaming_fallback: {
+    message: "Voy un pelín más lento: he pasado a generar la voz de una vez.",
+    hint: "El streaming de audio no está disponible; la respuesta llega completa en lugar de por trozos.",
+  },
+  text_fallback: {
+    message: "No puedo hablar ahora mismo, pero te respondo por escrito.",
+    hint: "El audio en tiempo real no está disponible; la conversación sigue por texto.",
   },
   unknown: {
     message: "Ha ocurrido un error inesperado.",

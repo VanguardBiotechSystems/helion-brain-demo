@@ -5,9 +5,12 @@ import { getProfileById } from "@/lib/server/profiles";
 import { createRealtimeClientSecret } from "@/lib/server/realtime";
 import { buildSessionMemoryContext, getMemoryStore, getMemoryHealth } from "@/lib/server/memory/service";
 import { buildSelfKnowledgeBlock } from "@/lib/server/memory/selfKnowledge";
-import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
+import { clientIpFrom, enforceRateLimit } from "@/lib/server/rateLimit";
 import { logError } from "@/lib/server/log";
-import { captureError } from "@/lib/server/observability";
+import { captureError, captureMessage } from "@/lib/server/observability";
+import { decideCostAction } from "@/lib/server/costControl";
+import { recordSessionStarted, sessionsStartedToday } from "@/lib/server/telemetryStore";
+import { ERROR_COPY } from "@/lib/shared/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -39,8 +42,8 @@ export async function POST(request: NextRequest) {
   }
 
   const ip = clientIpFrom(request.headers);
-  const perIp = getLimiter("session-ip", 10, 10 * 60 * 1000).check(ip);
-  const global = getLimiter("session-global", 40, 10 * 60 * 1000).check("global");
+  const perIp = enforceRateLimit("session-ip", `ip:${ip}`);
+  const global = enforceRateLimit("session-global", "global");
   if (!perIp.allowed || !global.allowed) {
     const retryAfterMs = Math.max(perIp.retryAfterMs, global.retryAfterMs);
     return NextResponse.json(
@@ -48,6 +51,24 @@ export async function POST(request: NextRequest) {
       { status: 429, headers: { "Retry-After": String(Math.ceil(retryAfterMs / 1000)) } },
     );
   }
+
+  // Control de coste (§5): si se alcanzó el límite duro de sesiones del día,
+  // se rechaza con un mensaje honesto (nunca se corta a mitad de conversación).
+  const dayIso = new Date(Date.now()).toISOString().slice(0, 10);
+  const isOwner = profile.role === "owner" && session.identityStatus === "confirmed";
+  const costDecision = decideCostAction(
+    { sessionsToday: sessionsStartedToday(dayIso), estimatedCostToday: 0 },
+    env.costControl,
+    isOwner,
+  );
+  if (costDecision.blockNew) {
+    captureMessage("sesión bloqueada por control de coste", { category: "session_create", code: "usage_limited" });
+    return NextResponse.json(
+      { error: { code: "usage_limited", message: ERROR_COPY.usage_limited.message, hint: ERROR_COPY.usage_limited.hint } },
+      { status: 429 },
+    );
+  }
+  recordSessionStarted(dayIso);
 
   // Recuerdos previos para la continuidad entre sesiones. Un fallo de
   // memoria nunca debe impedir la conversación: se degrada a contexto vacío.

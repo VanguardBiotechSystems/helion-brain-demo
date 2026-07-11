@@ -16,6 +16,17 @@ export interface ResolvedVoiceMode {
   mode: Exclude<VoiceMode, "futuro_gateway">;
   requested: string;
   fallback: boolean;
+  /** true si el modo se degradó por control de coste (§5), no por config. */
+  costDowngraded?: boolean;
+}
+
+/**
+ * Aplica el downgrade por coste sobre un modo ya resuelto: calidad_voz →
+ * demo_estable de forma INFORMADA (marca costDowngraded). No toca demo_estable.
+ */
+export function applyCostDowngrade(resolved: ResolvedVoiceMode, downgrade: boolean): ResolvedVoiceMode {
+  if (!downgrade || resolved.mode !== "calidad_voz") return resolved;
+  return { ...resolved, mode: "demo_estable", costDowngraded: true, fallback: true };
 }
 
 export function resolveVoiceMode(env: AppEnv, requestedRaw?: string): ResolvedVoiceMode {

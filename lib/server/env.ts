@@ -118,6 +118,16 @@ export interface AppEnv {
   helion: HelionTuning;
   audio: AudioConfig;
   memory: MemoryConfig;
+  costControl: CostControlEnv;
+}
+
+export interface CostControlEnv {
+  softDailySessions: number;
+  hardDailySessions: number;
+  maxSessionMs: number;
+  killOpenai: boolean;
+  killElevenlabs: boolean;
+  ownerExempt: boolean;
 }
 
 export interface EnvResult {
@@ -410,7 +420,19 @@ export function readEnv(source: Record<string, string | undefined> = process.env
       helion: readHelionTuning(source),
       audio: readAudioConfig(source),
       memory,
+      costControl: readCostControl(source),
     },
     missing: [],
+  };
+}
+
+function readCostControl(source: Record<string, string | undefined>): CostControlEnv {
+  return {
+    softDailySessions: parseNumber(source.COST_SOFT_DAILY_SESSIONS, 0, 0, 100_000),
+    hardDailySessions: parseNumber(source.COST_HARD_DAILY_SESSIONS, 0, 0, 100_000),
+    maxSessionMs: parseNumber(source.COST_MAX_SESSION_MS, 0, 0, 86_400_000),
+    killOpenai: parseBoolean(source.COST_KILL_OPENAI, false),
+    killElevenlabs: parseBoolean(source.COST_KILL_ELEVENLABS, false),
+    ownerExempt: parseBoolean(source.COST_OWNER_EXEMPT, true),
   };
 }
