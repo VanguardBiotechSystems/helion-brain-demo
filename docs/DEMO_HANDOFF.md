@@ -25,7 +25,7 @@ gh repo create helion --private --source=. --push
    | `SESSION_SECRET` | `openssl rand -hex 32` |
    | `VOICE_ENGINE` | `elevenlabs` (modo demo actual) |
    | `ELEVENLABS_API_KEY` | tu clave de ElevenLabs |
-   | `ELEVENLABS_VOICE_ID` | tu voz española elegida |
+   | `ELEVENLABS_VOICE_ID` | `r8cXSGtllevsD7FGkMTx` (voz recomendada para la demo) |
    | `ELEVENLABS_TTS_MODE` | `http_stream` (recomendado en serverless) |
    | `ELEVENLABS_SPEED` | `1.08` |
    | `AUDIO_PROFILE` | `demo_balanced` |
