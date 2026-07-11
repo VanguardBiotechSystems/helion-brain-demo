@@ -320,7 +320,12 @@ function readAudioConfig(source: Record<string, string | undefined>): AudioConfi
       preset.noiseReduction,
     ),
     gate: {
-      enabled: parseBoolean(source.LOCAL_AUDIO_GATE_ENABLED, true),
+      // Por defecto DESACTIVADO: el gate local muteaba el clon saliente hasta
+      // detectar voz, cortando el arranque de la primera palabra (p.ej. el wake
+      // word "Helion") y degradando la transcripción. La segmentación y el
+      // filtrado de ruido los hace mejor el server_vad + noise_reduction de
+      // OpenAI. Se puede reactivar con LOCAL_AUDIO_GATE_ENABLED=true.
+      enabled: parseBoolean(source.LOCAL_AUDIO_GATE_ENABLED, false),
       calibrationMs: parseNumber(source.LOCAL_AUDIO_CALIBRATION_MS, 2000, 500, 10000),
       minSpeechMs: parseNumber(source.LOCAL_AUDIO_MIN_SPEECH_MS, preset.gateMinSpeechMs, 100, 2000),
       spikeRejectionMs: parseNumber(

@@ -92,19 +92,70 @@ export function normalizeWake(text: string): string {
     .trim();
 }
 
-/** Variantes de escritura/pronunciación toleradas por nombre. */
+// Stems canónicos para fuzzy/prefijo. NUNCA stems cortos ambiguos ("helio",
+// "ion"): el fuzzy solo opera sobre estos.
+const CORE_STEMS = ["helion", "elion", "hellion", "ellion"];
+// Palabras que RIMAN con el nombre (-ión y parecidas) y NO deben activar por
+// fuzzy. Salvaguarda auditable contra falsos positivos.
+const NEGATIVE_TOKENS = new Set([
+  "avion", "camion", "union", "reunion", "millon", "billon", "region", "legion", "cancion",
+  "opinion", "eleccion", "rebelion", "pension", "mansion", "ilusion", "nacion", "racion",
+  "mocion", "leon", "elon", "salon", "talon", "jamon", "limon", "balon", "razon", "corazon",
+  "religion", "television", "sesion", "vision", "pasion", "mision", "funcion", "estacion",
+]);
+// Primer token que NO debe formar par de nombre (evita "el ion" → "elion").
+const PAIR_BLOCK_FIRST = new Set(["el", "la", "al", "del", "un", "lo", "los", "las"]);
+
+/** Levenshtein acotado: corta en cuanto supera max (barato). */
+function editDistanceLE(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = new Array(b.length + 1);
+  let curr = new Array(b.length + 1);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    let rowMin = curr[0];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    if (rowMin > max) return max + 1;
+    [prev, curr] = [curr, prev];
+  }
+  return prev[b.length];
+}
+
+/** ¿el token es una variante robusta del nombre? Devuelve el stem o null. */
+function matchToken(token: string): string | null {
+  const w = token.replace(/[^a-z0-9ñ]/g, "");
+  if (!w || NEGATIVE_TOKENS.has(w)) return null;
+  // 1) Prefijo: el STT pega la palabra siguiente ("helionpor", "elionporfa").
+  for (const stem of CORE_STEMS) {
+    if (w.length > stem.length && w.startsWith(stem)) return stem;
+  }
+  // 2) Fuzzy de 1 edición ("elionn", "eliom", "helios", "elyon"); solo len>=5.
+  if (w.length >= 5) {
+    for (const stem of CORE_STEMS) {
+      if (editDistanceLE(w, stem, 1) <= 1) return stem;
+    }
+  }
+  return null;
+}
+
+/** Variantes de escritura/pronunciación toleradas por nombre (match exacto). */
 function nameVariants(names: string[]): string[] {
   const out = new Set<string>();
-  for (const raw of names) {
+  const add = (raw: string) => {
     const n = normalizeWake(raw).replace(/[^a-z0-9ñ ]/g, "").trim();
-    if (!n) continue;
+    if (!n) return;
     out.add(n);
     out.add(n.replace(/\s+/g, "")); // "e lion" → "elion"
-  }
-  // Errores comunes del transcriptor.
-  ["helion", "elion", "helio", "helión", "e lion", "elian", "eelion"].forEach((v) =>
-    out.add(normalizeWake(v).replace(/\s+/g, " ")),
-  );
+  };
+  for (const raw of names) add(raw);
+  // Errores comunes del transcriptor español.
+  ["helion", "elion", "helio", "helión", "elian", "eelion", "helios",
+    "hellion", "ellion", "ellon", "elyon", "e lion", "he lion", "hell ion"].forEach(add);
   return [...out].filter(Boolean);
 }
 
@@ -121,16 +172,27 @@ const HARD_COMMANDS = ["parate", "detente", "callate", "calla", "silencio", "apa
 
 function findName(words: string[], variants: string[]): { index: number; word: string } | null {
   for (let i = 0; i < words.length; i++) {
-    // token exacto o token que sea una variante compacta
     const w = words[i].replace(/[^a-z0-9ñ]/g, "");
     if (variants.includes(w)) return { index: i, word: w };
-    // "e lion" → dos tokens
-    if (i + 1 < words.length) {
+    // Pares divididos por el STT: "e lion"/"he lion"/"hell ion" (NO "el ion").
+    if (i + 1 < words.length && !PAIR_BLOCK_FIRST.has(w)) {
       const pair = (w + words[i + 1].replace(/[^a-z0-9ñ]/g, "")).trim();
       if (variants.includes(pair)) return { index: i, word: pair };
+      const mp = matchToken(pair);
+      if (mp) return { index: i, word: mp };
     }
+    // Fuzzy/prefijo sobre el token suelto ("elionn", "helios", "helionpor").
+    const m = matchToken(w);
+    if (m) return { index: i, word: m };
   }
   return null;
+}
+
+/** Helper puro: ¿el texto contiene el nombre de activación? (para el cliente). */
+export function containsWakeName(text: string, agentNames: string[]): boolean {
+  const variants = nameVariants(agentNames);
+  const words = normalizeWake(text).split(" ").filter(Boolean);
+  return findName(words, variants) !== null;
 }
 
 function hasCommand(words: string[]): string | null {

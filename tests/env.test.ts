@@ -56,7 +56,9 @@ describe("readEnv", () => {
     expect(env!.audio.vadSilenceMs).toBe(650);
     expect(env!.audio.vadPrefixPaddingMs).toBe(400);
     expect(env!.audio.noiseReduction).toBe("near_field");
-    expect(env!.audio.gate.enabled).toBe(true);
+    // Gate local desactivado por defecto: no corta el arranque de la voz
+    // (wake word) ni degrada la transcripción; OpenAI segmenta y filtra ruido.
+    expect(env!.audio.gate.enabled).toBe(false);
     expect(env!.audio.gate.minSpeechMs).toBe(220);
     expect(env!.audio.gate.spikeRejectionMs).toBe(160);
     expect(env!.audio.gate.thresholdMultiplier).toBe(2.0);

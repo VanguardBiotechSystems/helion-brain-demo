@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateAddressing, normalizeWake, DEFAULT_WAKE_CONFIG, type AddressingInput } from "@/lib/wake/addressingGate";
+import { evaluateAddressing, normalizeWake, containsWakeName, DEFAULT_WAKE_CONFIG, type AddressingInput } from "@/lib/wake/addressingGate";
 
 function decide(text: string, over: Partial<AddressingInput> = {}) {
   return evaluateAddressing({ text, inputMode: "voice", attentive: false, agentSpeaking: false, ...over });
@@ -203,5 +203,35 @@ describe("AddressingGate — estrategia SIMPLE (fiable, tipo Alexa)", () => {
   it("el texto escrito sigue siendo intención explícita (responde sin nombre)", () => {
     const d = decideS("¿Qué eres?", { inputMode: "text" });
     expect(d.shouldRespond).toBe(true);
+  });
+});
+
+describe("AddressingGate — matcher difuso del nombre (robustez STT)", () => {
+  const ACTIVAN = [
+    "Helion, dime quién eres", "Elion, ¿me escuchas?", "Helión, preséntate",
+    "elion dime la hora", "helios cuéntame", "elyon estás ahí", "elionn qué haces",
+    "eliom repite eso", "ellion hola", "hell ion qué tal", "he lion ayúdame",
+    "helionpor favor dime la hora", "oye helion", "e lion ven",
+  ];
+  const NO_ACTIVAN = [
+    "dime quién eres", "necesito un avión", "vimos un camión", "la unión hace la fuerza",
+    "ganó las elecciones", "fue una rebelión", "un millón de gracias", "en esta región",
+    "me gusta esa canción", "en mi opinión", "el león del zoo", "Elon Musk lanzó un cohete",
+    "el ion de litio", "hola, ¿cómo estás?", "¿qué hora es?",
+  ];
+
+  it("containsWakeName: activan los que llevan el nombre (aunque mal transcrito)", () => {
+    for (const t of ACTIVAN) expect(containsWakeName(t, ["Helion", "Elion", "Helión"]), t).toBe(true);
+  });
+
+  it("containsWakeName: NO activan palabras en -ión ni parecidas (sin falsos positivos)", () => {
+    for (const t of NO_ACTIVAN) expect(containsWakeName(t, ["Helion", "Elion", "Helión"]), t).toBe(false);
+  });
+
+  it("en estrategia simple, los casos con nombre responden y el resto callan", () => {
+    const cfg = { ...DEFAULT_WAKE_CONFIG, wakeStrategy: "simple" as const, mode: "directed" as const, attentionWindowMs: 0 };
+    const decide = (text: string) => evaluateAddressing({ text, inputMode: "voice", attentive: false, agentSpeaking: false, config: cfg });
+    for (const t of ACTIVAN) expect(decide(t).shouldRespond, t).toBe(true);
+    for (const t of NO_ACTIVAN) expect(decide(t).shouldRespond, t).toBe(false);
   });
 });

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERROR_COPY, toAppError, type AppError, type ErrorCode } from "@/lib/shared/errors";
 import { sendTelemetry } from "@/lib/client/telemetry";
-import { evaluateAddressing, type AddressingDecision, type WakeConfig } from "@/lib/wake/addressingGate";
+import { evaluateAddressing, containsWakeName, type AddressingDecision, type WakeConfig } from "@/lib/wake/addressingGate";
 import type { SessionEndCode } from "@/lib/shared/telemetry";
 import type {
   AgentStatus,
@@ -315,6 +315,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   // speech_started (antes de que el estado pase a "listening"/"thinking") para
   // que el gate detecte el comando de parada ("para/cállate") como barge-in.
   const wasSpeakingRef = useRef(false);
+  // Transcripción PARCIAL acumulada por item: a veces el streaming capta el
+  // onset ("Helion") que la transcripción final reescribe/pierde. Se usa como
+  // red para no perder la activación por nombre.
+  const partialBufferRef = useRef(new Map<string, string>());
   const processedCallsRef = useRef(new Set<string>());
   // Motor de voz de la sesión activa y estado del pipeline TTS (elevenlabs).
   const engineRef = useRef<VoiceEngine>("openai_realtime");
@@ -448,6 +452,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     }
     attentiveUntilRef.current = 0;
     setAttentive(false);
+    partialBufferRef.current.clear();
     const dc = dcRef.current;
     dcRef.current = null;
     if (dc) {
@@ -1144,6 +1149,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         case "conversation.item.input_audio_transcription.delta":
           if (event.item_id && typeof event.delta === "string") {
             logRef.current.appendUserPartial(event.item_id, event.delta);
+            partialBufferRef.current.set(
+              event.item_id,
+              (partialBufferRef.current.get(event.item_id) ?? "") + event.delta,
+            );
           }
           break;
 
@@ -1170,7 +1179,22 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
               break;
             }
             // Escucha permanente con activación inteligente: decide si responder.
-            void evaluateTurn(transcript, "voice").then((decision) => {
+            void evaluateTurn(transcript, "voice").then((baseDecision) => {
+              let decision = baseDecision;
+              // Malla de recuperación: si por reglas NO respondería pero el
+              // nombre SÍ aparece en la transcripción PARCIAL (el final lo
+              // reescribió/perdió), trátalo como dirigido. No añade falsos
+              // positivos: sigue exigiendo el nombre, solo usa la mejor fuente.
+              const partial = partialBufferRef.current.get(itemId) ?? "";
+              partialBufferRef.current.delete(itemId);
+              if (
+                !decision.shouldRespond &&
+                partial &&
+                containsWakeName(partial, cfg.agentNames) &&
+                !containsWakeName(transcript, cfg.agentNames)
+              ) {
+                decision = { ...decision, shouldRespond: true, mode: "direct_address", reason: "nombre en transcripción parcial", cleanedUserText: transcript };
+              }
               if (!decision.shouldRespond) {
                 // NO dirigido: sin memoria, sin respuesta. Transcript pasivo opcional.
                 if (uiConfigRef.current?.transcriptShowIgnored && cfg.allowBackgroundTranscript) {
