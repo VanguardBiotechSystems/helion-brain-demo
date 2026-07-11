@@ -22,6 +22,10 @@ export interface AudioGateEnvConfig {
   thresholdMultiplier: number;
   /** AGC del navegador: apagado por defecto para no amplificar ruido. */
   autoGainControl: boolean;
+  /** Recalibración adaptativa del gate ante deriva del ruido (§11). */
+  adaptiveRecalibration: boolean;
+  /** Wake word suave "Helion" (§11): experimental, apagada por defecto. */
+  wakeWordEnabled: boolean;
 }
 
 export interface AudioConfig {
@@ -290,6 +294,8 @@ function readAudioConfig(source: Record<string, string | undefined>): AudioConfi
         10,
       ),
       autoGainControl: parseBoolean(source.LOCAL_AUDIO_AGC, false),
+      adaptiveRecalibration: parseBoolean(source.LOCAL_AUDIO_ADAPTIVE_RECALIBRATION, true),
+      wakeWordEnabled: parseBoolean(source.HELION_WAKE_WORD_ENABLED, false),
     },
   };
 }

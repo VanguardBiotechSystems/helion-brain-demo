@@ -31,6 +31,12 @@ export interface AudioGateConfig {
   hangoverMs: number;
   /** Huecos breves tolerados dentro de un candidato a voz (ms). */
   maxCandidateGapMs: number;
+  /** Recalibración adaptativa ante deriva sostenida del ruido de fondo. */
+  adaptiveRecalibration: boolean;
+  /** Deriva mínima (× sobre el suelo base) para plantear recalibrar. */
+  driftFactor: number;
+  /** La deriva debe sostenerse este tiempo antes de recalibrar (ms). */
+  driftSustainMs: number;
 }
 
 export const DEFAULT_GATE_CONFIG: AudioGateConfig = {
@@ -42,6 +48,11 @@ export const DEFAULT_GATE_CONFIG: AudioGateConfig = {
   exitMultiplier: 0.6,
   hangoverMs: 700,
   maxCandidateGapMs: 140,
+  // Defaults afinados intactos: la recalibración solo actúa ante una deriva
+  // real y sostenida (≈2× durante ≈30 s), nunca en el caso normal.
+  adaptiveRecalibration: true,
+  driftFactor: 2.0,
+  driftSustainMs: 30_000,
 };
 
 export interface GateSnapshot {
@@ -62,6 +73,8 @@ export interface GateSnapshot {
   blockedNoises: number;
   /** Último RMS procesado (0..1). */
   level: number;
+  /** Recalibraciones automáticas por deriva desde el arranque. */
+  recalibrations: number;
 }
 
 /** RMS de un buffer de dominio temporal de un AnalyserNode (bytes 0-255). */
@@ -94,6 +107,13 @@ export class AudioGateEngine {
   private hangoverStart = 0;
   private blockedNoises = 0;
   private lastLevel = 0;
+  // Recalibración adaptativa (§11): suelo base de referencia fijado en la
+  // última (re)calibración, EWMA del ruido en idle e inicio de deriva.
+  private baselineNoiseFloor = 0;
+  private idleEwma = 0;
+  private driftStart: number | null = null;
+  private recalibrations = 0;
+  private agentSpeaking = false;
 
   constructor(private readonly config: AudioGateConfig = DEFAULT_GATE_CONFIG) {}
 
@@ -103,6 +123,56 @@ export class AudioGateEngine {
     this.calibrationStart = now;
     this.calibrationSamples = [];
     this.blockedNoises = 0;
+    this.driftStart = null;
+  }
+
+  /**
+   * Pausa la adaptación mientras Helion habla: su voz (por eco/altavoz) no
+   * debe aprenderse como ruido de fondo. La UI lo activa al reproducir.
+   */
+  setAgentSpeaking(speaking: boolean): void {
+    this.agentSpeaking = speaking;
+    if (speaking) this.driftStart = null; // cancela cualquier deriva en curso
+  }
+
+  /**
+   * Recalibración adaptativa (§11). Solo en idle, con el gate cerrado y con
+   * Helion callado: así nunca aprende voz (candidate/open quedan fuera) ni el
+   * eco del propio altavoz. Requiere que el ruido de fondo (EWMA de las
+   * muestras idle) supere baseline × driftFactor de forma SOSTENIDA
+   * (driftSustainMs). Con histéresis: la deriva se cancela si el ruido baja
+   * del 80% del umbral de disparo. La subida del suelo es GRADUAL (mitad del
+   * camino) y acotada, para no desbocarse.
+   */
+  private trackDrift(now: number, rms: number): void {
+    const { config } = this;
+    // No adapta con voz confirmada ni mientras Helion habla: así el suelo de
+    // ruido no incorpora ni la voz del usuario ni el eco del altavoz.
+    if (!config.adaptiveRecalibration || this.agentSpeaking || this.state === "open" || this.state === "hangover") {
+      this.driftStart = null;
+      return;
+    }
+    if (this.baselineNoiseFloor <= 0) return; // aún sin calibrar
+    // EWMA lenta del ruido de fondo (robusta a picos sueltos).
+    this.idleEwma = this.idleEwma * 0.98 + rms * 0.02;
+    const trigger = this.baselineNoiseFloor * config.driftFactor;
+    const release = trigger * 0.8; // banda de histéresis
+
+    if (this.idleEwma >= trigger) {
+      if (this.driftStart === null) this.driftStart = now;
+      else if (now - this.driftStart >= config.driftSustainMs) {
+        // Recalibración gradual: mover el suelo a mitad de camino del ruido
+        // observado, acotado a 4× el baseline para no desbocarse.
+        const target = Math.min(this.idleEwma, this.baselineNoiseFloor * 4);
+        this.noiseFloor = this.noiseFloor * 0.5 + target * 0.5;
+        this.threshold = Math.max(this.noiseFloor * config.thresholdMultiplier, config.minThreshold);
+        this.baselineNoiseFloor = this.noiseFloor;
+        this.recalibrations += 1;
+        this.driftStart = null;
+      }
+    } else if (this.idleEwma < release) {
+      this.driftStart = null; // el ruido volvió: se cancela la deriva
+    }
   }
 
   snapshot(): GateSnapshot {
@@ -118,6 +188,7 @@ export class AudioGateEngine {
       threshold: this.threshold,
       blockedNoises: this.blockedNoises,
       level: this.lastLevel,
+      recalibrations: this.recalibrations,
     };
   }
 
@@ -125,6 +196,12 @@ export class AudioGateEngine {
   process(now: number, rms: number): GateSnapshot {
     this.lastLevel = rms;
     const { config } = this;
+
+    // Deriva del ruido de fondo: se rastrea en todas las fases salvo con voz
+    // CONFIRMADA (open/hangover) o mientras Helion habla — así nunca aprende
+    // voz ni el eco propio. La recalibración se aplica solo con el gate
+    // cerrado (idle/candidate), no interrumpe una frase en curso.
+    if (this.state !== "calibrating") this.trackDrift(now, rms);
 
     switch (this.state) {
       case "calibrating": {
@@ -134,6 +211,9 @@ export class AudioGateEngine {
           // p75: robusto frente a algún pico durante la calibración.
           this.noiseFloor = percentile(this.calibrationSamples, 0.75);
           this.threshold = Math.max(this.noiseFloor * config.thresholdMultiplier, config.minThreshold);
+          this.baselineNoiseFloor = this.noiseFloor;
+          this.idleEwma = this.noiseFloor;
+          this.driftStart = null;
           this.state = "idle";
         }
         break;
