@@ -17,6 +17,34 @@ export async function enterApp(page: Page): Promise<void> {
   }
 }
 
+/**
+ * Mockea /api/session con una respuesta 200 bien formada (sin proveedor real).
+ * El client_secret es falso: la conexión WebRTC no llega a completarse, pero
+ * la UI recorre requesting_mic → connecting, que es lo que se verifica.
+ */
+export async function mockSessionUp(page: Page): Promise<void> {
+  await page.route("**/api/session", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        clientSecret: "ek_e2e_fake_secret",
+        expiresAt: Date.now() + 600000,
+        model: "gpt-realtime-2.1",
+        voice: "cedar",
+        agentName: "Helion",
+        baseUrl: "https://api.openai.com",
+        voiceEngine: "openai_realtime",
+        audioGate: { enabled: true, calibrationMs: 2000, minSpeechMs: 220, spikeRejectionMs: 160, thresholdMultiplier: 2, autoGainControl: false },
+        memory: { enabled: true, autoSave: true },
+        versions: { app: "0.1.0", prompt: "1.0.0", selfModel: "1.1.0" },
+      }),
+    }),
+  );
+  // La negociación WebRTC (calls) también se intercepta para no salir a red.
+  await page.route("**/v1/realtime/**", (route) => route.fulfill({ status: 400, body: "e2e" }));
+}
+
 /** Mockea /api/session para simular fallo de creación (proveedor caído). */
 export async function mockSessionDown(page: Page): Promise<void> {
   await page.route("**/api/session", (route) =>

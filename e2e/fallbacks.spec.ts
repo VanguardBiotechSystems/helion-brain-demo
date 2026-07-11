@@ -1,4 +1,4 @@
-import { test, expect, enterApp, mockSessionDown, mockUsageLimited } from "./fixtures";
+import { test, expect, enterApp, mockSessionDown, mockUsageLimited, mockSessionUp } from "./fixtures";
 
 /**
  * Fallbacks honestos (§8) y estados de degradación (§6). El orbe y los
@@ -11,6 +11,18 @@ test.describe("degradación honesta", () => {
     await enterApp(page);
     await expect(page.locator("canvas")).toBeVisible();
     await expect(page.getByRole("button", { name: /encender helion/i })).toBeVisible();
+  });
+
+  test("camino feliz: al encender con sesión válida sale de 'en espera'", async ({ page }) => {
+    await enterApp(page);
+    await mockSessionUp(page);
+    await page.getByRole("button", { name: /encender helion/i }).click();
+    // La UI avanza hacia un estado de conexión (pide micro / conecta); el
+    // botón deja de decir "Encender" y aparece un texto transitorio.
+    await expect(page.getByRole("button", { name: /apagar|conectando|reconectando/i }))
+      .toBeVisible({ timeout: 15_000 });
+    // No hay banner de error en el camino feliz.
+    await expect(page.locator(".min-error")).toHaveCount(0);
   });
 
   test("proveedor de sesión caído → mensaje honesto, no 'todo bien'", async ({ page }) => {

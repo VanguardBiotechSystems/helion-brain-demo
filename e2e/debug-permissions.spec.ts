@@ -23,10 +23,13 @@ test.describe("consola de depuración", () => {
     await expect(page.locator("button").first()).toBeVisible();
   });
 
-  test("?debug=1 entra directamente en modo avanzado", async ({ page }) => {
+  test("?debug=1 entra directamente en modo avanzado (señal concreta)", async ({ page }) => {
     await mockIdentity(page, "owner", true);
     await enterApp(page);
     await page.goto("/?debug=1");
-    await expect(page.locator("body")).toBeVisible();
+    // Señal concreta de modo avanzado: la vista minimalista desaparece y
+    // aparece la consola técnica (controles que no existen en la minimalista).
+    await expect(page.locator(".min-shell")).toHaveCount(0, { timeout: 10_000 });
+    await expect(page.getByText(/Diagnóstico|Memoria|Conectar|en espera/i).first()).toBeVisible({ timeout: 10_000 });
   });
 });

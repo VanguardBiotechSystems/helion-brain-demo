@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AppError } from "@/lib/shared/errors";
 import type { AgentStatus, LatencyReport, ListenMode, MicSettingsInfo, SessionInfo } from "@/lib/shared/types";
 import { statusLabel } from "./ConnectionStatus";
@@ -94,6 +94,8 @@ export default function DiagnosticsPanel({
   data: DiagnosticsData;
   onCalibrate: () => void;
 }) {
+  const panelRef = useRef<HTMLElement | null>(null);
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [memStats, setMemStats] = useState<MemoryStatsResponse | null>(null);
   const [ops, setOps] = useState<OpsResponse | null>(null);
@@ -131,6 +133,11 @@ export default function DiagnosticsPanel({
       setVoiceTest({ state: "error", message: "No se pudo reproducir el audio de prueba." });
     }
   }
+
+  // Al abrir, el foco va al botón de cierre (foco modal accesible).
+  useEffect(() => {
+    if (open) closeBtnRef.current?.focus();
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -239,12 +246,36 @@ export default function DiagnosticsPanel({
       <section
         className="diag-panel"
         role="dialog"
+        aria-modal="true"
         aria-label="Panel de diagnóstico"
+        ref={panelRef}
         onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          // Escape cierra; Tab queda atrapado dentro del panel (foco modal).
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+            return;
+          }
+          if (event.key !== "Tab") return;
+          const focusables = panelRef.current?.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          );
+          if (!focusables || focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
       >
         <div className="diag-head">
           <h2>Diagnóstico</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Cerrar diagnóstico">
+          <button className="icon-btn" onClick={onClose} aria-label="Cerrar diagnóstico" ref={closeBtnRef}>
             <CloseIcon />
           </button>
         </div>
