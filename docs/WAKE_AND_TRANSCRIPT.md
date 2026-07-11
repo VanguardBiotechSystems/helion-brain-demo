@@ -82,7 +82,7 @@ TRANSCRIPT_PERSIST=false
 ```
 
 ## Qué decirle a Sergio
-«Helion ahora escucha siempre pero solo contesta cuando le hablas a él: dile "Helion" y pregúntale, o llámalo "Helion" y tienes unos segundos para seguir sin repetir el nombre. Si menciono Helion en una frase sobre él, no interrumpe. Si el micro falla, escríbele por el panel de abajo. La voz es la de ElevenLabs (`D7dkYvH17OKLgp4SLulf`).»
+«Helion ahora escucha siempre pero solo contesta cuando le hablas a él: dile "Helion" y pregúntale, o llámalo "Helion" y tienes unos segundos para seguir sin repetir el nombre. Si menciono Helion en una frase sobre él, no interrumpe. Si el micro falla, escríbele por el panel de abajo. La voz es la de ElevenLabs (`r8cXSGtllevsD7FGkMTx`).»
 
 ## Limitaciones honestas
 - El clasificador de modelo depende de la red; con timeout, prevalece el fallback seguro (no responder). Las reglas cubren los casos frecuentes sin latencia.
