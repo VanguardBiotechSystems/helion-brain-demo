@@ -45,7 +45,9 @@ export async function POST(request: NextRequest) {
 
   const ip = clientIpFrom(request.headers);
   const perIp = enforceRateLimit("session-ip", `ip:${ip}`);
-  const global = enforceRateLimit("session-global", "global");
+  // Solo se consume el bucket global si la IP pasó su límite: así una sola IP
+  // bloqueada no puede agotar el cupo global (DoS de baja intensidad).
+  const global = perIp.allowed ? enforceRateLimit("session-global", "global") : { allowed: true, retryAfterMs: 0 };
   if (!perIp.allowed || !global.allowed) {
     const retryAfterMs = Math.max(perIp.retryAfterMs, global.retryAfterMs);
     return NextResponse.json(

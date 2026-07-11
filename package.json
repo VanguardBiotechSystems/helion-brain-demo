@@ -13,7 +13,8 @@
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install --with-deps chromium webkit",
     "release:gate": "node scripts/release-gate.mjs",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "benchmark:self-model": "tsx scripts/self-model-drift.mjs"
   },
   "dependencies": {
     "next": "^15.5.4",

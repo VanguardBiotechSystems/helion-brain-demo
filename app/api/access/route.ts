@@ -51,9 +51,9 @@ export async function POST(request: NextRequest) {
 
   const ip = clientIpFrom(request.headers);
   const perIp = enforceRateLimit("login", `ip:${ip}`);
-  // Tope global IP-independiente: aunque un atacante rote la IP (XFF), el
-  // total de intentos de acceso por ventana queda acotado.
-  const global = enforceRateLimit("login-global", "global");
+  // Tope global IP-independiente contra brute force con IP spoofeada. Solo se
+  // consume si la IP concreta pasó su límite (evita DoS del cupo global).
+  const global = perIp.allowed ? enforceRateLimit("login-global", "global") : { allowed: true, retryAfterMs: 0 };
   if (!perIp.allowed || !global.allowed) {
     const retryAfterMs = Math.max(perIp.retryAfterMs, global.retryAfterMs);
     return NextResponse.json(
