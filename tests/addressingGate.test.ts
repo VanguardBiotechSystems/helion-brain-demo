@@ -155,3 +155,53 @@ describe("AddressingGate — contrato de memoria (ignorados no guardan)", () => 
     expect(d.shouldRespond).toBe(false);
   });
 });
+
+describe("AddressingGate — estrategia SIMPLE (fiable, tipo Alexa)", () => {
+  const simple = {
+    ...DEFAULT_WAKE_CONFIG,
+    wakeStrategy: "simple" as const,
+    mode: "directed" as const,
+    attentionWindowMs: 0, // estricto: nombre en cada turno
+  };
+  const decideS = (text: string, over: Partial<AddressingInput> = {}) =>
+    evaluateAddressing({ text, inputMode: "voice", attentive: false, agentSpeaking: false, config: simple, ...over });
+
+  it("responde si el nombre aparece, aunque sea sintácticamente 'mención'", () => {
+    // La simplicidad es el rasgo: cualquier turno con «Helion» activa.
+    for (const t of ["Helion, ¿qué hora es?", "Oye Helion, ayúdame", "Helion está funcionando bien", "cuéntame algo, Helion"]) {
+      const d = decideS(t);
+      expect(d.shouldRespond, t).toBe(true);
+    }
+  });
+
+  it("NO responde si no se dice el nombre", () => {
+    for (const t of ["Hola, ¿cómo estás?", "¿Qué hora es?", "Estábamos hablando del proyecto"]) {
+      const d = decideS(t);
+      expect(d.shouldRespond, t).toBe(false);
+      expect(d.mode, t).toBe("background");
+    }
+  });
+
+  it("'Helion' a secas → wake_only", () => {
+    const d = decideS("Helion");
+    expect(d.shouldRespond).toBe(true);
+    expect(d.mode).toBe("wake_only");
+    expect(d.cleanedUserText).toBe("");
+  });
+
+  it("con ventana 0, un turno atento sin nombre NO responde (estricto)", () => {
+    const d = decideS("¿y mañana?", { attentive: true });
+    expect(d.shouldRespond).toBe(false);
+  });
+
+  it("seguridad: 'para' mientras Helion habla corta aunque no diga el nombre", () => {
+    const d = decideS("para", { agentSpeaking: true });
+    expect(d.shouldRespond).toBe(true);
+    expect(d.mode).toBe("command");
+  });
+
+  it("el texto escrito sigue siendo intención explícita (responde sin nombre)", () => {
+    const d = decideS("¿Qué eres?", { inputMode: "text" });
+    expect(d.shouldRespond).toBe(true);
+  });
+});

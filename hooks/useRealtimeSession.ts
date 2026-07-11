@@ -761,6 +761,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       const config: WakeConfig | undefined = clientCfg
         ? {
             mode: clientCfg.mode,
+            wakeStrategy: clientCfg.wakeStrategy,
             agentNames: clientCfg.agentNames,
             requireDirectAddress: clientCfg.requireDirectAddress,
             attentionWindowMs: clientCfg.attentionWindowMs,

@@ -161,6 +161,7 @@ export async function POST(request: NextRequest) {
     profile: { id: profile.id, displayName: profile.displayName, role: profile.role, identityStatus },
     wake: {
       mode: env.wake.mode,
+      wakeStrategy: env.wake.wakeStrategy,
       agentNames: env.wake.agentNames,
       requireDirectAddress: env.wake.requireDirectAddress,
       attentionWindowMs: env.wake.attentionWindowMs,

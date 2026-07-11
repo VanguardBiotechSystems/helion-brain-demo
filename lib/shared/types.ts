@@ -139,6 +139,7 @@ export interface SessionResponse {
 
 export interface WakeClientConfig {
   mode: "directed" | "open";
+  wakeStrategy: "simple" | "smart";
   agentNames: string[];
   requireDirectAddress: boolean;
   attentionWindowMs: number;

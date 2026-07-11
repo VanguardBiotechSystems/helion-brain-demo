@@ -141,6 +141,8 @@ export interface CostControlEnv {
 export interface WakeEnv {
   /** directed = solo responde si se dirigen a Helion; open = a todo. */
   mode: "directed" | "open";
+  /** simple = responde si aparece el nombre (fiable); smart = gate completo. */
+  wakeStrategy: "simple" | "smart";
   agentNames: string[];
   requireDirectAddress: boolean;
   attentionWindowMs: number;
@@ -484,10 +486,12 @@ function readWakeConfig(source: Record<string, string | undefined>): WakeEnv {
     .map((n) => n.trim())
     .filter(Boolean);
   return {
-    // Por defecto OPEN: Helion responde a la voz detectada (comportamiento
-    // clásico). "directed" (responder solo si se le habla a él) queda como
-    // opt-in experimental — depende mucho de la calidad de la transcripción.
-    mode: parseEnum<"directed" | "open">(source.WAKE_MODE, ["directed", "open"], "open"),
+    // Por defecto DIRECTED con estrategia SIMPLE: Helion solo responde si dices
+    // su nombre («Helion…»); si no, calla (tipo Alexa). La estrategia simple es
+    // determinista (nombre presente → responde), a diferencia del gate "smart"
+    // que distinguía vocativo/mención y resultó poco fiable en vivo.
+    mode: parseEnum<"directed" | "open">(source.WAKE_MODE, ["directed", "open"], "directed"),
+    wakeStrategy: parseEnum<"simple" | "smart">(source.WAKE_STRATEGY, ["simple", "smart"], "simple"),
     agentNames: names.length > 0 ? names : ["Helion"],
     requireDirectAddress: parseBoolean(source.WAKE_REQUIRE_DIRECT_ADDRESS, true),
     attentionWindowMs: parseNumber(source.WAKE_ATTENTION_WINDOW_MS, 10_000, 0, 120_000),

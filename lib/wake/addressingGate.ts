@@ -23,6 +23,14 @@ export type InputMode = "voice" | "text";
 export interface WakeConfig {
   /** directed = solo responde si se dirigen a él; open = responde a todo. */
   mode: "directed" | "open";
+  /**
+   * Estrategia de activación en modo directed:
+   * - "simple": determinista y fiable — responde si el nombre aparece; si no,
+   *   calla. Sin distinción vocativo/mención ni clasificador de modelo.
+   * - "smart": distingue vocativo de mención en 3ª persona, ventana atenta y
+   *   clasificador para casos ambiguos (más "listo" pero menos predecible).
+   */
+  wakeStrategy: "simple" | "smart";
   /** Nombres/variantes de activación (se normalizan). */
   agentNames: string[];
   requireDirectAddress: boolean;
@@ -37,6 +45,7 @@ export interface WakeConfig {
 
 export const DEFAULT_WAKE_CONFIG: WakeConfig = {
   mode: "directed",
+  wakeStrategy: "smart",
   agentNames: ["Helion", "Elion", "Helión"],
   requireDirectAddress: true,
   attentionWindowMs: 10_000,
@@ -186,6 +195,58 @@ export function evaluateAddressing(input: AddressingInput): AddressingDecision {
       reason: "entrada escrita: intención explícita",
       mode: "direct_address",
     };
+  }
+
+  // ESTRATEGIA SIMPLE (fiable): en voz, responde SOLO si el nombre aparece en
+  // el turno; si no, calla. Sin distinguir vocativo de mención ni clasificador
+  // de modelo — es lo que el producto usa por defecto porque es predecible.
+  if (config.wakeStrategy === "simple") {
+    const simpleName = findName(words, variants);
+    const simpleCommand = hasCommand(words);
+    // Seguridad: "para"/"cállate" mientras Helion habla corta aunque no diga
+    // el nombre (barge-in de parada).
+    if (simpleCommand && input.agentSpeaking) {
+      return {
+        ...base,
+        shouldRespond: true,
+        confidence: "high",
+        reason: `comando "${simpleCommand}" mientras habla`,
+        mode: "command",
+        detectedWakeWord: simpleName?.word ?? null,
+        cleanedUserText: input.text.trim(),
+      };
+    }
+    if (simpleName) {
+      base.detectedWakeWord = simpleName.word;
+      base.addressedAgentName =
+        config.agentNames.find((n) => normalizeWake(n).replace(/\s+/g, "") === simpleName.word.replace(/\s+/g, "")) ??
+        config.agentNames[0];
+      const stripped = stripVocative(normalized, variants);
+      const contentless = stripped === "" || /^[¿?¡!.,\s]*$/.test(stripped);
+      return {
+        ...base,
+        shouldRespond: true,
+        confidence: "high",
+        reason: "nombre presente (estrategia simple)",
+        mode: contentless ? "wake_only" : "direct_address",
+        cleanedUserText: contentless ? "" : input.text.trim(),
+        opensAttention: config.attentionWindowMs > 0,
+      };
+    }
+    // Ventana atenta opcional: por defecto desactivada en simple (nombre en
+    // cada turno). Solo aplica si WAKE_ATTENTION_WINDOW_MS > 0.
+    if (input.attentive && config.attentionWindowMs > 0) {
+      return {
+        ...base,
+        shouldRespond: normalized.length > 0,
+        confidence: "medium",
+        reason: "dentro de la ventana atenta",
+        mode: "attentive",
+        cleanedUserText: input.text.trim(),
+        opensAttention: true,
+      };
+    }
+    return { ...base, shouldRespond: false, confidence: "high", reason: "sin nombre (estrategia simple)", mode: "background" };
   }
 
   const name = findName(words, variants);
