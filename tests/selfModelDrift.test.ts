@@ -26,7 +26,8 @@ describe("self-model — contrato determinista (§5)", () => {
     const block = buildSelfKnowledgeBlock(env(), false);
     expect(block).toContain("OpenAI Realtime");
     expect(block).toContain("NO es persistente");
-    expect(block).toContain("No controlas hardware");
+    // No controla hardware real: los gestos son simulación, el cuerpo está inmóvil.
+    expect(block).toContain("simulación registrada");
     expect(block).toContain("parada de emergencia");
   });
 

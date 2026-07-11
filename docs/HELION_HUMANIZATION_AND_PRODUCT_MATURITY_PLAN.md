@@ -2,6 +2,13 @@
 
 *Auditoría brutal + hoja de ruta de "demo impresionante" a "cerebro humanoide serio". 2026-07-10.*
 
+> **Obsoleto en parte (2026-07-11):** las secciones sobre el persona de voz
+> ("hombre joven sereno, nunca teatral", registro por interlocutor "con Juanma…")
+> y sobre la identificación del interlocutor ("¿Sigues siendo tú, Juanma?") están
+> **superadas** por el persona v2.0.0 (robot humanoide irónico/teatral, inspiración
+> C-3PO) y por la **retirada de la identificación** (`IDENTITY_ENABLED=false`).
+> Fuente de verdad actual: `lib/server/personality.ts` y `lib/server/memory/selfKnowledge.ts`.
+
 ---
 
 ## 1. Diagnóstico del estado actual (sin marketing)
