@@ -62,7 +62,16 @@ export async function createPendingMemory(
   const created = await createMemory(
     store,
     { ...input, provenance: { ...(input.provenance ?? {}), pendingConfirmation: meta } },
-    { embed, actor: "system", reason: reason || "pendiente de confirmación", actorProfileId: input.ownerProfileId },
+    {
+      embed,
+      actor: "system",
+      reason: reason || "pendiente de confirmación",
+      actorProfileId: input.ownerProfileId,
+      // Una candidata pendiente (sin confirmar) NUNCA debe fusionarse sobre una
+      // memoria activa existente (secuestro) ni degradar su confianza por
+      // revisión de creencias antes de confirmarse.
+      skipDedupAndRelations: true,
+    },
   );
   if (!created.ok || !created.item) return null;
 

@@ -102,15 +102,32 @@ function normalize(text: string): string {
     .trim();
 }
 
-/** Resuelve un perfil conocido a partir de "soy sergio", "sergio, el del robot"… */
+/**
+ * Resuelve un perfil conocido a partir de "soy sergio", "sergio, el del robot"…
+ * Coincidencia por PALABRA COMPLETA (límites de palabra), no por subcadena:
+ * un `includes` suelto permitía spoofing ("no soy juanma" → resolvía a Juanma)
+ * y resoluciones al perfil equivocado por coincidencias parciales.
+ */
 export function matchProfileByAlias(profiles: AccessProfile[], claim: string): AccessProfile | null {
   const text = normalize(claim).replace(/^(soy|me llamo|aqui|habla|ahora estas hablando con|cambia a( perfil)?)\s+/g, "");
   if (!text) return null;
+  // Palabras del enunciado, como conjunto, para exigir coincidencia exacta de
+  // token o de secuencia de tokens (alias multi-palabra).
+  const words = text.split(" ").filter(Boolean);
+  const wordSet = new Set(words);
   for (const profile of profiles) {
     for (const alias of [profile.id, profile.displayName, ...profile.aliases]) {
       const a = normalize(alias);
-      if (a && (text === a || text.startsWith(`${a} `) || text.includes(` ${a}`) || text.includes(a))) {
-        return profile;
+      if (!a) continue;
+      const aWords = a.split(" ").filter(Boolean);
+      if (aWords.length === 1) {
+        // Alias de una palabra: debe aparecer como TOKEN completo.
+        if (wordSet.has(a)) return profile;
+      } else {
+        // Alias multi-palabra: la secuencia debe aparecer contigua.
+        if (text === a || text.startsWith(`${a} `) || text.endsWith(` ${a}`) || text.includes(` ${a} `)) {
+          return profile;
+        }
       }
     }
   }

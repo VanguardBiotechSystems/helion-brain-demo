@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:install": "playwright install --with-deps chromium webkit"
+    "test:e2e:install": "playwright install --with-deps chromium webkit",
+    "release:gate": "node scripts/release-gate.mjs",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "next": "^15.5.4",

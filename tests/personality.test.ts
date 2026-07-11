@@ -6,6 +6,7 @@ import {
   promptSections,
 } from "@/lib/server/personality";
 import { buildSelfKnowledgeBlock, SELF_KNOWLEDGE_VERSION } from "@/lib/server/memory/selfKnowledge";
+import { buildIdentityBlock, ownerPinNote } from "@/lib/server/identityPrompt";
 import { readEnv } from "@/lib/server/env";
 
 const STATIC_BUDGET = 3500;
@@ -16,14 +17,25 @@ function envFor(extra: Record<string, string> = {}) {
   return env!;
 }
 
+// Mide el prompt estático con el bloque de identidad REAL (el que construye
+// lib/server/identityPrompt.ts en producción), no una cadena fabricada: así el
+// presupuesto se enforce contra la realidad. Toma el PEOR de los tres estados
+// de interlocutor, con aviso de PIN de demo (owner sin PIN).
 function staticPrompt(engine: "openai_realtime" | "elevenlabs") {
   const env = envFor();
-  const identity = "\n\n# Interlocutor\nHablas con Juanma (owner); no lo anuncies salvo que pregunten. Cambio de persona → identity_set; los recuerdos privados de otros NO existen aquí.";
-  return buildAgentInstructions("Helion", engine, {
-    memoryEnabled: true,
-    identityBlock: identity,
-    selfKnowledgeBlock: buildSelfKnowledgeBlock(env, true),
-  });
+  const sk = buildSelfKnowledgeBlock(env, true);
+  const pinNote = ownerPinNote(true, "");
+  const prof = { displayName: "Juanma", role: "owner" as const };
+  let worst = "";
+  for (const status of ["unknown", "claimed", "confirmed"] as const) {
+    const full = buildAgentInstructions("Helion", engine, {
+      memoryEnabled: true,
+      identityBlock: buildIdentityBlock(status, prof, pinNote),
+      selfKnowledgeBlock: sk,
+    });
+    if (full.length > worst.length) worst = full;
+  }
+  return worst;
 }
 
 describe("constitución de voz v1 — presupuesto y desglose", () => {

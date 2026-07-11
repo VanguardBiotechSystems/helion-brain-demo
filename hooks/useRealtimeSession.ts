@@ -901,6 +901,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
             identityRestartRef.current = true;
             injectedMemoryIdsRef.current.clear();
             setLastRecall([]);
+            // PRIVACIDAD: descarta los turnos aún sin extraer de la identidad
+            // ANTERIOR. Si no, la extracción posterior (que usa la cookie ya
+            // cambiada) los guardaría atribuidos a la NUEVA identidad → fuga.
+            exchangesRef.current = [];
+            extractWatermarkRef.current = 0;
             // Barrido visual: Helion cierra un contexto y abre otro. No
             // muestra datos del perfil anterior (es solo un gesto del orbe).
             identitySwitchesRef.current += 1;
@@ -1257,6 +1262,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         const session = (await sessionResponse.json()) as SessionResponse;
         sessionStartAtRef.current = performance.now();
         if (session.versions) versionsRef.current = session.versions;
+        // Degradación de voz por coste: se informa, nunca es silenciosa.
+        if (session.voiceDowngraded) {
+          logRef.current.addSystem("Voz de calidad no disponible ahora: uso la voz estable.");
+        }
         engineRef.current = session.voiceEngine ?? "openai_realtime";
         ttsConfigRef.current = session.tts ?? DEFAULT_TTS_CONFIG;
         const gateCfg = session.audioGate ?? null;

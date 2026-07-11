@@ -19,7 +19,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const store = await getMemoryStore(guard.env);
-    const result = await forgetMemories(store, guard.env, query, "user", guard.profile);
+    const confirmed = guard.identityStatus === "confirmed";
+    const result = await forgetMemories(store, guard.env, query, "user", guard.profile, confirmed);
     return NextResponse.json(result);
   } catch (error) {
     logError("memory", "Fallo olvidando recuerdos", error);

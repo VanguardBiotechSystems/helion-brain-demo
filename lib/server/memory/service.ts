@@ -139,9 +139,17 @@ export interface CreateMemoryResult {
 export async function createMemory(
   store: MemoryStore,
   input: NewMemoryItem,
-  options: { embed?: EmbedFn; actor?: MemoryActor; reason?: string; actorProfileId?: string | null } = {},
+  options: {
+    embed?: EmbedFn;
+    actor?: MemoryActor;
+    reason?: string;
+    actorProfileId?: string | null;
+    /** Salta deduplicación Y revisión de creencias (para memorias pendientes:
+     * una candidata sin confirmar no debe fusionarse ni degradar activas). */
+    skipDedupAndRelations?: boolean;
+  } = {},
 ): Promise<CreateMemoryResult> {
-  const { embed, actor = "system", reason = "", actorProfileId = null } = options;
+  const { embed, actor = "system", reason = "", actorProfileId = null, skipDedupAndRelations = false } = options;
   const text = `${input.title} ${input.content} ${input.canonicalContent ?? ""}`;
 
   // Capa A/B: el contenido que intenta actuar como instrucción del sistema o
@@ -168,9 +176,33 @@ export async function createMemory(
 
   const embedding = input.embedding ?? (embed ? await embed(input.canonicalContent ?? input.content) : null);
 
-  // Deduplicación: embedding si lo hay; si no, coincidencia exacta de contenido.
-  const actives = await store.list({ status: "active", limit: 1000 });
+  // Deduplicación y revisión de creencias: SOLO contra memorias del MISMO
+  // dueño y alcance. Sin este filtro, un candidato de un perfil podría
+  // fusionarse (store.update) sobre el recuerdo privado de OTRO perfil: fuga
+  // y corrupción entre perfiles. El scope/owner efectivos se calculan igual
+  // que en materialize().
+  const effectiveScope = input.scope ?? "project_demo";
+  const effectiveOwner =
+    input.ownerProfileId ?? (effectiveScope === "private" ? (input.createdByProfileId ?? null) : null);
+  const allActives = await store.list({ status: "active", limit: 1000 });
+  const actives = allActives.filter(
+    (m) => m.scope === effectiveScope && m.ownerProfileId === effectiveOwner,
+  );
   let duplicate: { item: MemoryItem; similarity: number } | null = null;
+  if (skipDedupAndRelations) {
+    // Pendiente: nunca fusiona ni relaciona; crea nueva y sale del bloque.
+    const item = materialize({ ...input, embedding });
+    await store.create(item);
+    await store.logEvent({
+      id: makeMemoryId(),
+      action: "created",
+      memoryId: item.id,
+      reason: reason || `origen: ${input.source}`,
+      actor,
+      createdAt: nowIso(),
+    });
+    return { ok: true, item };
+  }
   for (const candidate of actives) {
     if (embedding && candidate.embedding) {
       const similarity = cosineSimilarity(embedding, candidate.embedding);
@@ -442,8 +474,11 @@ export async function forgetMemories(
   query: string,
   actor: MemoryActor = "user",
   profile?: AccessProfile,
+  confirmed = true,
 ): Promise<ForgetResult> {
-  const matches = await searchMemories(store, env, query, { topK: 5, markAccessed: false, profile });
+  // Sin identidad confirmada NO se busca (ni archiva) memoria privada/de
+  // proyecto: evita que una identidad solo sugerida borre o filtre títulos.
+  const matches = await searchMemories(store, env, query, { topK: 5, markAccessed: false, profile, confirmed });
   const archived: ForgetResult["archived"] = [];
   for (const { item, score } of matches) {
     if (score < FORGET_MIN_SCORE) continue;

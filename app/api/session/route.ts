@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_COOKIE, verifyAccessToken } from "@/lib/server/access";
 import { readEnv } from "@/lib/server/env";
-import { getProfileById } from "@/lib/server/profiles";
+import { getProfileById, type IdentityStatus } from "@/lib/server/profiles";
 import { createRealtimeClientSecret } from "@/lib/server/realtime";
 import { buildSessionMemoryContext, getMemoryStore, getMemoryHealth } from "@/lib/server/memory/service";
 import { buildSelfKnowledgeBlock, SELF_KNOWLEDGE_VERSION } from "@/lib/server/memory/selfKnowledge";
 import { VOICE_CONSTITUTION_VERSION } from "@/lib/server/personality";
+import { buildIdentityBlock, ownerPinNote } from "@/lib/server/identityPrompt";
 import { clientIpFrom, enforceRateLimit } from "@/lib/server/rateLimit";
 import { logError } from "@/lib/server/log";
 import { captureError, captureMessage } from "@/lib/server/observability";
@@ -93,37 +94,28 @@ export async function POST(request: NextRequest) {
   }
 
   // Identidad del interlocutor y autoconocimiento: salen del SERVIDOR.
-  const identityStatus = session!.identityStatus;
-  const pinNote =
-    env.identity.requireOwnerPin && !env.identity.ownerPin
-      ? " (aviso: OWNER_IDENTITY_PIN no configurado; el owner se acepta sin PIN en modo demo)"
-      : "";
-  // Tres estados de interlocutor (sección 7): DESCONOCIDO (preguntar),
-  // SUGERIDO (cookie sin confirmar: reconocer con duda, sin abrir lo privado),
-  // CONFIRMADO (identidad verificada). El owner sugerido exige PIN.
-  const suggested = identityStatus === "claimed" || identityStatus === "guest";
-  const identityBlock =
-    identityStatus === "unknown"
-      ? `
-
-# Interlocutor: DESCONOCIDO
-En tu primera respuesta pregunta: "Antes de empezar, dime con quién estoy hablando." Al identificarse ("Soy Sergio"), usa identity_set (si pide PIN, pídelo con naturalidad); si prefieren no decirlo, identity_set con "visitante". Hasta entonces: solo material público/demo, nada privado ni de proyecto.${pinNote}`
-      : suggested
-        ? `
-
-# Interlocutor: PROBABLE ${profile.displayName} (sin confirmar)
-Puede que vuelvas a hablar con ${profile.displayName}, pero NO lo des por seguro. Pregúntalo con naturalidad ("¿Sigues siendo tú, ${profile.displayName}?") y confírmalo con identity_set${profile.role === "owner" ? " (como owner, pídele el PIN)" : ""}. Hasta confirmar: nada privado ni de proyecto; solo material público/demo.${pinNote}`
-        : `
-
-# Interlocutor
-Hablas con ${profile.displayName} (${profile.role}); no lo anuncies salvo que pregunten. Cambio de persona → identity_set; "olvida quién soy" → identity_reset. Los recuerdos privados de otros NO existen en esta conversación.`;
+  // Tres estados (§7): DESCONOCIDO (preguntar), SUGERIDO (cookie sin
+  // confirmar: reconocer con duda, sin abrir lo privado), CONFIRMADO. El
+  // bloque lo construye lib/server/identityPrompt.ts (medido por el test de
+  // presupuesto contra el código real).
+  const identityStatus = session!.identityStatus as IdentityStatus;
+  const pinNote = ownerPinNote(env.identity.requireOwnerPin, env.identity.ownerPin);
+  const identityBlock = buildIdentityBlock(identityStatus, profile, pinNote);
   let selfKnowledgeBlock = "";
   if (env.memory.selfKnowledgeEnabled) {
     const health = await getMemoryHealth(env).catch(() => null);
     selfKnowledgeBlock = buildSelfKnowledgeBlock(env, health?.persistent ?? false);
   }
 
-  const result = await createRealtimeClientSecret(env, { memoryContext, identityBlock, selfKnowledgeBlock });
+  // Control de coste (§5): si la decisión pide degradar la voz (límite blando
+  // o kill switch de ElevenLabs), la sesión usa demo_estable (OpenAI) de forma
+  // INFORMADA — el cliente recibe voiceDowngraded para avisar, nunca un cambio
+  // de voz silencioso.
+  const voiceDowngraded = costDecision.downgradeVoice && env.voiceEngine === "elevenlabs";
+  const effectiveEngine = voiceDowngraded ? "openai_realtime" : env.voiceEngine;
+  const sessionEnv = voiceDowngraded ? { ...env, voiceEngine: "openai_realtime" as const } : env;
+
+  const result = await createRealtimeClientSecret(sessionEnv, { memoryContext, identityBlock, selfKnowledgeBlock });
   if (!result.ok) {
     captureError(new Error(`session_create: ${result.code}`), {
       category: "session_create",
@@ -138,10 +130,11 @@ Hablas con ${profile.displayName} (${profile.role}); no lo anuncies salvo que pr
     clientSecret: result.clientSecret,
     expiresAt: result.expiresAt,
     model: result.model,
-    voice: env.voiceEngine === "elevenlabs" ? env.elevenLabsVoiceId : result.voice,
+    voice: effectiveEngine === "elevenlabs" ? env.elevenLabsVoiceId : result.voice,
     agentName: result.agentName,
     baseUrl: env.openaiBaseUrl,
-    voiceEngine: env.voiceEngine,
+    voiceEngine: effectiveEngine,
+    voiceDowngraded,
     audioGate: {
       enabled: env.audio.gate.enabled,
       calibrationMs: env.audio.gate.calibrationMs,

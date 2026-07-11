@@ -25,6 +25,11 @@ export async function POST(request: NextRequest) {
       { status: 403 },
     );
   }
+  // No se persiste conversación sin un interlocutor identificado: mientras la
+  // identidad sea DESCONOCIDA no hay dueño legítimo al que atribuir recuerdos.
+  if (guard.identityStatus === "unknown") {
+    return NextResponse.json({ saved: [], skipped: 0, pendingConfirmation: [], note: "identidad no resuelta" });
+  }
 
   const raw = Array.isArray(body?.messages) ? body.messages.slice(-MAX_MESSAGES) : [];
   const messages: CuratorInputMessage[] = [];

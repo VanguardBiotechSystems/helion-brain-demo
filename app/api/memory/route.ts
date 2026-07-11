@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { memoryDisabledResponse, requireAccess } from "@/lib/server/apiGuard";
 import { logError } from "@/lib/server/log";
-import { createMemory, filterMemoriesForProfile, getMemoryStore, makeEmbedder } from "@/lib/server/memory/service";
+import { createMemory, getMemoryStore, makeEmbedder } from "@/lib/server/memory/service";
+import { filterMemoriesForRetrieval } from "@/lib/server/memory/permissions";
 import { createPendingMemory } from "@/lib/server/memory/pending";
 import { detectScopeCues } from "@/lib/server/memory/permissions";
 import { ASSERTION_TYPES, type MemoryAssertionType, type MemoryListFilter, type MemorySensitivity, type MemoryType } from "@/lib/server/memory/types";
@@ -28,7 +29,10 @@ export async function GET(request: NextRequest) {
       query: params.get("q") ?? undefined,
       limit: 200,
     };
-    const items = filterMemoriesForProfile(await store.list(filter), guard.profile);
+    // Sin identidad confirmada no se listan memorias privadas/de proyecto
+    // (una cookie que solo "sugiere" no basta para ver lo privado).
+    const confirmed = guard.identityStatus === "confirmed";
+    const items = filterMemoriesForRetrieval(await store.list(filter), guard.profile, confirmed);
     return NextResponse.json({
       provider: store.provider,
       count: items.length,

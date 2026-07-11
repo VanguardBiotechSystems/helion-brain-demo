@@ -122,5 +122,7 @@ export interface SessionResponse {
   audioGate?: ClientGateConfig;
   memory?: { enabled: boolean; autoSave: boolean };
   versions?: { app: string; prompt: string; selfModel: string };
+  /** true si la voz de calidad se degradó a demo_estable por control de coste. */
+  voiceDowngraded?: boolean;
   tts?: TtsClientConfig;
 }
