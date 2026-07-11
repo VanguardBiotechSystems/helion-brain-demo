@@ -117,6 +117,7 @@ export default function MinimalVoiceExperience({
 
   return (
     <div className="min-shell">
+      <div className="min-stage">
       <span className="min-brand" aria-hidden>
         {appName}
       </span>
@@ -185,6 +186,7 @@ export default function MinimalVoiceExperience({
           {buttonLabel}
         </button>
       )}
+      </div>
 
       {showConsole && onSendText && (
         <ConversationConsole
