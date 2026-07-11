@@ -68,29 +68,38 @@ function drift(t: number, seed: number): { x: number; y: number } {
 }
 
 export interface OrbPulse {
-  kind: "heard" | "memory";
+  kind: "heard" | "memory" | "identity";
   seq: number;
 }
+
+// El barrido de identidad dura más (un cierre/apertura de contexto) y se
+// autocompleta aunque la sesión de proveedor tarde.
+const PULSE_MS: Record<OrbPulse["kind"], number> = { heard: 450, memory: 450, identity: 900 };
 
 export default function HelionOrb({
   status,
   micLevelRef,
   agentLevelRef,
   pulse = null,
+  micUnavailable = false,
 }: {
   status: AgentStatus;
   micLevelRef: RefObject<number>;
   agentLevelRef: RefObject<number>;
-  /** Microestados perceptivos: "te he oído" (heard) y recuerdo guardado (memory). */
+  /** Microestados perceptivos: "te he oído" (heard), recuerdo (memory), cambio de identidad. */
   pulse?: OrbPulse | null;
+  /** Anillo ámbar tenue: mic denegado/muteado/perdido/no soportado (§12). */
+  micUnavailable?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const statusRef = useRef<AgentStatus>(status);
   statusRef.current = status;
+  const micUnavailableRef = useRef(micUnavailable);
+  micUnavailableRef.current = micUnavailable;
   // Suavizado persistente entre re-ejecuciones del efecto (sin saltos).
   const smoothRef = useRef({ energy: 0.05, scale: 0.8, hueA: 220, hueB: 254, sat: 62, pull: 1, level: 0 });
-  // Pulso activo: {kind, startedAt} — se dibuja ~450 ms y se autocancela.
-  const pulseRef = useRef<{ kind: "heard" | "memory"; startedAt: number } | null>(null);
+  // Pulso activo: {kind, startedAt} — se dibuja y se autocancela.
+  const pulseRef = useRef<{ kind: OrbPulse["kind"]; startedAt: number } | null>(null);
   useEffect(() => {
     if (pulse) pulseRef.current = { kind: pulse.kind, startedAt: performance.now() };
   }, [pulse]);
@@ -251,12 +260,13 @@ export default function HelionOrb({
 
       context.restore(); // fin del clipping: nada interno sale de aquí
 
-      // 6b) Microestados perceptivos: anillo breve de recepción ("te he
-      // oído", cian) o destello dorado de recuerdo guardado. Nace de un
-      // evento semántico real; con reduce-motion no se anima.
+      // 6b) Microestados perceptivos: recepción ("te he oído", cian),
+      // recuerdo guardado (destello dorado) o cambio de identidad (barrido
+      // violeta que cierra un contexto y abre otro). Nacen de eventos reales;
+      // con reduce-motion no se anima.
       const activePulse = pulseRef.current;
       if (activePulse && !reduceMotion) {
-        const age = (timestamp - activePulse.startedAt) / 450;
+        const age = (timestamp - activePulse.startedAt) / PULSE_MS[activePulse.kind];
         if (age >= 1) {
           pulseRef.current = null;
         } else {
@@ -267,7 +277,7 @@ export default function HelionOrb({
             context.beginPath();
             context.arc(cx, cy, radius * (1.02 + age * 0.12), 0, Math.PI * 2);
             context.stroke();
-          } else {
+          } else if (activePulse.kind === "memory") {
             const glow = context.createRadialGradient(cx, cy, radius * 0.5, cx, cy, radius);
             glow.addColorStop(0, `hsla(45, 85%, 62%, ${0.16 * fade})`);
             glow.addColorStop(1, "hsla(45, 85%, 62%, 0)");
@@ -275,8 +285,29 @@ export default function HelionOrb({
             context.beginPath();
             context.arc(cx, cy, radius, 0, Math.PI * 2);
             context.fill();
+          } else {
+            // Identidad: un arco de barrido gira una vuelta (cierra→abre).
+            const sweep = age * Math.PI * 2;
+            context.strokeStyle = `hsla(276, 70%, 74%, ${0.5 * (1 - Math.abs(age - 0.5) * 2)})`;
+            context.lineWidth = 2.5;
+            context.beginPath();
+            context.arc(cx, cy, radius * 1.05, sweep - 0.9, sweep);
+            context.stroke();
           }
         }
+      }
+
+      // 6c) Micrófono no disponible (§12): anillo ámbar tenue y estable, muy
+      // distinto de un error cognitivo/red (que va en el banner). Siempre
+      // visible (no depende de reduce-motion: no se anima).
+      if (micUnavailableRef.current) {
+        context.strokeStyle = "hsla(38, 90%, 60%, 0.5)";
+        context.lineWidth = 2;
+        context.setLineDash([radius * 0.16, radius * 0.1]);
+        context.beginPath();
+        context.arc(cx, cy, radius * 1.08, 0, Math.PI * 2);
+        context.stroke();
+        context.setLineDash([]);
       }
 
       // 7) Borde óptico: un trazo fino, casi imperceptible.
@@ -296,8 +327,9 @@ export default function HelionOrb({
       alive = false;
       cancelAnimationFrame(rafId);
     };
-    // Con reduce-motion se redibuja un frame estático por cambio de estado.
-  }, [micLevelRef, agentLevelRef, status]);
+    // Con reduce-motion se redibuja un frame estático por cambio de estado
+    // (incluye micUnavailable para que el anillo ámbar aparezca/desaparezca).
+  }, [micLevelRef, agentLevelRef, status, micUnavailable]);
 
   const state = ORB_STATES[status] ?? ORB_STATES.idle;
   const haloHue = (state.hues[0] + state.hues[1]) / 2;

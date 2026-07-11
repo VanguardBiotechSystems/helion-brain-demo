@@ -5,6 +5,7 @@ import type { AppError } from "@/lib/shared/errors";
 import type { AgentStatus, ListenMode } from "@/lib/shared/types";
 import HelionOrb, { type OrbPulse } from "./HelionOrb";
 import { statusLabel } from "./ConnectionStatus";
+import { haptic } from "@/lib/client/haptics";
 
 /**
  * Experiencia pública minimalista: solo el orbe de Helion, una línea de
@@ -27,6 +28,7 @@ interface MinimalVoiceExperienceProps {
   onResumeAudio: () => void;
   onAdvanced: () => void;
   orbPulse?: OrbPulse | null;
+  micUnavailable?: boolean;
 }
 
 function minimalErrorMessage(error: AppError): string {
@@ -50,6 +52,7 @@ export default function MinimalVoiceExperience({
   onResumeAudio,
   onAdvanced,
   orbPulse = null,
+  micUnavailable = false,
 }: MinimalVoiceExperienceProps) {
   const tapsRef = useRef<number[]>([]);
 
@@ -92,7 +95,7 @@ export default function MinimalVoiceExperience({
         {appName}
       </span>
 
-      <HelionOrb status={status} micLevelRef={micLevelRef} agentLevelRef={agentLevelRef} pulse={orbPulse} />
+      <HelionOrb status={status} micLevelRef={micLevelRef} agentLevelRef={agentLevelRef} pulse={orbPulse} micUnavailable={micUnavailable} />
 
       <p
         className="min-status"
@@ -123,6 +126,7 @@ export default function MinimalVoiceExperience({
             className={`lg-button lg-ptt ${pttActive ? "lg-ptt-active" : ""}`}
             onPointerDown={(event) => {
               event.preventDefault();
+              haptic(12); // confirmación táctil ligera (si el navegador lo permite)
               onPttChange(true);
             }}
             onPointerUp={() => onPttChange(false)}

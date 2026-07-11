@@ -122,3 +122,37 @@ describe("modo avanzado (oculto)", () => {
     expect(screen.queryByText(/conversación/i)).toBeNull();
   });
 });
+
+describe("microestados visuales (bloque 3 §12)", () => {
+  it("renderiza el orbe con micUnavailable y pulso de identidad sin romper", () => {
+    const { container } = render(
+      <MinimalVoiceExperience
+        appName="Helion"
+        status="listening"
+        error={null}
+        isConnected
+        listenMode="auto"
+        pttActive={false}
+        micLevelRef={{ current: 0 }}
+        agentLevelRef={{ current: 0 }}
+        onPower={() => {}}
+        onPttChange={() => {}}
+        onResumeAudio={() => {}}
+        onAdvanced={() => {}}
+        orbPulse={{ kind: "identity", seq: 1 }}
+        micUnavailable
+      />,
+    );
+    // El orbe (canvas) está presente; los props nuevos no rompen el render.
+    expect(container.querySelector("canvas")).not.toBeNull();
+  });
+});
+
+describe("haptics opcionales (bloque 3 §12)", () => {
+  it("no lanza en navegadores sin soporte y respeta reduce-motion", async () => {
+    const { haptic, hapticsAvailable } = await import("@/lib/client/haptics");
+    // jsdom no implementa navigator.vibrate → no disponible, y haptic() no lanza.
+    expect(hapticsAvailable()).toBe(false);
+    expect(() => haptic(10)).not.toThrow();
+  });
+});

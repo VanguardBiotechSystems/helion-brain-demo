@@ -219,7 +219,7 @@ export interface RealtimeSession {
   /** Resumen de sesión: turnos, % rápidas (<1.5 s), interrupciones. */
   sessionStats: { turns: number; fastResponses: number; interruptions: number; latenciesMs: number[]; reconnects: number; fallbacks: number };
   /** Pulso perceptivo del orbe ("te he oído" / recuerdo guardado). */
-  orbPulse: { kind: "heard" | "memory"; seq: number } | null;
+  orbPulse: { kind: "heard" | "memory" | "identity"; seq: number } | null;
   connect(): Promise<void>;
   disconnect(): void;
   restart(): Promise<void>;
@@ -263,9 +263,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
     reconnects: 0,
     fallbacks: 0,
   });
-  const [orbPulse, setOrbPulse] = useState<{ kind: "heard" | "memory"; seq: number } | null>(null);
+  const [orbPulse, setOrbPulse] = useState<{ kind: "heard" | "memory" | "identity"; seq: number } | null>(null);
   const pulseSeqRef = useRef(0);
-  const firePulse = useCallback((kind: "heard" | "memory") => {
+  const firePulse = useCallback((kind: "heard" | "memory" | "identity") => {
     pulseSeqRef.current += 1;
     setOrbPulse({ kind, seq: pulseSeqRef.current });
   }, []);
@@ -901,6 +901,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
             identityRestartRef.current = true;
             injectedMemoryIdsRef.current.clear();
             setLastRecall([]);
+            // Barrido visual: Helion cierra un contexto y abre otro. No
+            // muestra datos del perfil anterior (es solo un gesto del orbe).
+            firePulse("identity");
             output = { ...body, note: "Identidad actualizada; el contexto se reconstruirá ahora mismo." };
             logRef.current.addSystem("Identidad de sesión actualizada. Reconstruyendo contexto…");
           } else {

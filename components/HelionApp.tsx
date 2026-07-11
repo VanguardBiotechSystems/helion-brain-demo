@@ -122,6 +122,13 @@ export default function HelionApp({
       onResumeAudio={realtime.resumeAudio}
       onAdvanced={() => setAdvanced(true)}
       orbPulse={realtime.orbPulse}
+      micUnavailable={
+        realtime.muted ||
+        realtime.error?.code === "mic_permission" ||
+        realtime.error?.code === "mic_unavailable" ||
+        realtime.error?.code === "mic_lost" ||
+        realtime.error?.code === "browser_unsupported"
+      }
     />
   );
 }
