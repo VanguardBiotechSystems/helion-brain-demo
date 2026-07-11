@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+# Cancela ejecuciones antiguas de la misma rama.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Gates deterministas: NO dependen de OpenAI/ElevenLabs.
+  quality:
+    name: Lint · Typecheck · Test · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build
+        env:
+          # Build no necesita secretos reales; readEnv se evalúa por petición.
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  # E2E con Playwright: Chromium + WebKit + viewport móvil, proveedores
+  # simulados vía page.route (sin llamadas reales). Separado de los gates
+  # deterministas para que un fallo de navegador no bloquee lo demás.
+  e2e:
+    name: E2E (Chromium · WebKit · Mobile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Instalar navegadores Playwright
+        run: npx playwright install --with-deps chromium webkit
+      - name: Ejecutar E2E
+        run: npm run test:e2e
+        env:
+          CI: "1"
+      - name: Subir informe si falla
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

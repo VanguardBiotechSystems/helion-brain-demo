@@ -36,6 +36,7 @@ describe("recalibración adaptativa por deriva (bloque 3 §11)", () => {
     gate.calibrate(0);
     let t = feed(gate, 0, DEFAULT_GATE_CONFIG.calibrationMs + 400, 0.01); // ruido bajo estable
     t = feed(gate, t, 10_000, 0.01);
+    expect(t).toBeGreaterThan(0);
     expect(gate.snapshot().recalibrations).toBe(0);
   });
 
@@ -45,6 +46,7 @@ describe("recalibración adaptativa por deriva (bloque 3 §11)", () => {
     let t = feed(gate, 0, DEFAULT_GATE_CONFIG.calibrationMs + 400, 0.01);
     const before = gate.snapshot();
     t = feedNoisyDrift(gate, t, 35_000);
+    expect(t).toBeGreaterThan(0);
     const after = gate.snapshot();
     expect(after.recalibrations).toBeGreaterThanOrEqual(1);
     expect(after.threshold).toBeGreaterThan(before.threshold); // umbral subió
@@ -57,6 +59,7 @@ describe("recalibración adaptativa por deriva (bloque 3 §11)", () => {
     let t = feed(gate, 0, DEFAULT_GATE_CONFIG.calibrationMs + 400, 0.01);
     gate.setAgentSpeaking(true);
     t = feedNoisyDrift(gate, t, 35_000);
+    expect(t).toBeGreaterThan(0);
     expect(gate.snapshot().recalibrations).toBe(0);
   });
 
@@ -66,6 +69,7 @@ describe("recalibración adaptativa por deriva (bloque 3 §11)", () => {
     let t = feed(gate, 0, DEFAULT_GATE_CONFIG.calibrationMs + 400, 0.01);
     t = feedNoisyDrift(gate, t, 8_000); // solo 8 s de deriva
     t = feed(gate, t, 8_000, 0.008); // vuelve a la calma
+    expect(t).toBeGreaterThan(0);
     expect(gate.snapshot().recalibrations).toBe(0);
   });
 
@@ -74,6 +78,7 @@ describe("recalibración adaptativa por deriva (bloque 3 §11)", () => {
     gate.calibrate(0);
     let t = feed(gate, 0, DEFAULT_GATE_CONFIG.calibrationMs + 400, 0.01);
     t = feedNoisyDrift(gate, t, 35_000);
+    expect(t).toBeGreaterThan(0);
     expect(gate.snapshot().recalibrations).toBe(0);
   });
 });

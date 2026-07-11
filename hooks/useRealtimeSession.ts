@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toAppError, type AppError, type ErrorCode } from "@/lib/shared/errors";
+import { ERROR_COPY, toAppError, type AppError, type ErrorCode } from "@/lib/shared/errors";
 import type {
   AgentStatus,
   ClientGateConfig,
@@ -127,20 +127,7 @@ const RETRYABLE_ON_RECONNECT: ReadonlySet<string> = new Set([
 ]);
 
 function isKnownErrorCode(code: unknown): code is ErrorCode {
-  return (
-    typeof code === "string" &&
-    [
-      "not_authenticated",
-      "rate_limited",
-      "config_missing",
-      "session_create_failed",
-      "invalid_api_key",
-      "model_unavailable",
-      "quota_exceeded",
-      "openai_error",
-      "tts_failed",
-    ].includes(code)
-  );
+  return typeof code === "string" && Object.prototype.hasOwnProperty.call(ERROR_COPY, code);
 }
 
 function requestTimeoutSignal(ms: number): AbortSignal | undefined {
@@ -958,7 +945,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       });
       sendEvent({ type: "response.create" });
     },
-    [handleMemoryTool, sendEvent],
+    [firePulse, handleMemoryTool, sendEvent],
   );
 
   // ── Eventos del data channel ───────────────────────────────────────────

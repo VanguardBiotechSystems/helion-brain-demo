@@ -8,7 +8,7 @@ describe("scrubber de observabilidad (bloque 3 §1/§13)", () => {
       user: { pin: "1234", email: "juanma@example.com", displayName: "Juanma" },
       session: { clientSecret: "rt_abc123", nested: { authorization: "Bearer xyz" } },
     };
-    const out = scrub(input) as Record<string, any>;
+    const out = scrub(input) as Record<string, Record<string, Record<string, string>>>;
     expect(out.code).toBe("openai_error"); // benigno se conserva
     expect(out.user.pin).toBe(REDACTED);
     expect(out.user.email).toBe(REDACTED);
@@ -65,7 +65,7 @@ describe("scrubber de observabilidad (bloque 3 §1/§13)", () => {
   });
 
   it("acota profundidad y tamaño (no explota con estructuras enormes)", () => {
-    let deep: any = { v: "x" };
+    let deep: Record<string, unknown> = { v: "x" };
     for (let i = 0; i < 20; i++) deep = { child: deep };
     const out = JSON.stringify(scrub(deep));
     expect(out).toContain("profundidad máxima");

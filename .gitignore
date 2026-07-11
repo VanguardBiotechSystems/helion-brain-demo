@@ -27,3 +27,9 @@ coverage/
 
 # Archivo "env" sin punto (despiste habitual): también protegido
 env
+
+# Playwright
+e2e/.auth/
+test-results/
+playwright-report/
+.data/e2e-memory.json
