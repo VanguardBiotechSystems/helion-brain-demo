@@ -9,12 +9,15 @@ import type { AppEnv } from "../env";
 
 /**
  * CHANGELOG del self-model:
+ * 1.1.1 (2026-07-11, bloque 4): recorte de redundancias (voz/memoria) para que
+ *   el prompt estático quepa en ≤3.500 chars medido contra el bloque de
+ *   identidad REAL (no una cadena fabricada). Sin cambios de significado.
  * 1.1.0 (2026-07-10): dieta — de ~1.950 a ~750 chars; el detalle profundo
  *   vive como memorias system_self recuperables con memory_recall.
  * 1.0.0 (2026-07-10): primer bloque runtime-aware.
  */
-export const SELF_KNOWLEDGE_VERSION = "1.1.0";
-export const ARCHITECTURE_VERSION = "2026-07-10";
+export const SELF_KNOWLEDGE_VERSION = "1.1.1";
+export const ARCHITECTURE_VERSION = "2026-07-11";
 
 export function buildSelfKnowledgeBlock(env: AppEnv, memoryPersistent: boolean): string {
   const voice =

@@ -121,7 +121,7 @@ describe("autoconocimiento compacto", () => {
   it("es breve, versionado, veraz y sin secretos", () => {
     const env = envFor({ VOICE_ENGINE: "elevenlabs", ELEVENLABS_API_KEY: "clave-secreta-x", ELEVENLABS_VOICE_ID: "v" });
     const block = buildSelfKnowledgeBlock(env, false);
-    expect(SELF_KNOWLEDGE_VERSION).toBe("1.1.0");
+    expect(SELF_KNOWLEDGE_VERSION).toBe("1.1.1");
     expect(block.length).toBeLessThan(1100);
     expect(block).toContain("ElevenLabs");
     expect(block).toContain("NO es persistente");

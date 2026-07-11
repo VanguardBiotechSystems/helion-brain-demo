@@ -92,3 +92,41 @@ En todos los casos: TLS/mTLS, tokens rotatorios, sin puertos del robot expuestos
 - Ejecutar comandos físicos directamente desde el output del LLM sin validador determinista.
 - Exponer el robot a internet ni aceptar comandos sin autenticación mutua.
 - Habilitar hardware "solo para la demo" saltándose fases.
+
+---
+
+## Actualización bloque 4: AudioFrontend hardware, percepción y modo `shadow`
+
+### Regla actual (inequívoca)
+**Ningún componente del producto puede mover nada físico.** Los gestos son simulación registrada. Todo lo de abajo es diseño para el FUTURO, no capacidad presente.
+
+### AudioFrontend hardware (contrato ya preparado)
+La interfaz `lib/audio/audioFrontend.ts` desacopla el sistema cognitivo/gate del origen del audio. Una implementación de hardware cumpliría el mismo contrato y añadiría, tras el motor puro del gate:
+- **Micro array + beamforming**: dirección del haz hacia el hablante.
+- **AEC (cancelación de eco acústico)**: referencia del altavoz propio del robot.
+- **Supresión de la voz propia**: no tratar la voz de Helion como entrada.
+- **DSP / reducción de ruido**: en el borde, antes del gate.
+- **Dirección de llegada (DoA)**: metadato, no identidad.
+
+Las capacidades ya están declaradas (`beamforming`, `directionOfArrival`, `selfVoiceSuppression`) como reservadas.
+
+### Percepción y memoria (con consentimiento)
+- **Speaker verification / diarización**: NO ahora (ADR-007/008). Si algún día, con consentimiento explícito y como aumento de confianza, nunca como única puerta.
+- **Telemetría corporal** (batería, temperatura, postura): memoria de TRABAJO (efímera), NUNCA memoria persistente ni personal.
+- **Expresión facial y voz espacial**: salida, detrás del gateway y del e-stop.
+- **Bus de eventos**: intención → validación → registro; nunca actuación directa desde el LLM.
+
+### Modo `shadow` — REQUISITO PREVIO a cualquier actuación física
+Antes de mover un solo actuador, semanas en `shadow`:
+1. Helion genera una **intención** (no un comando).
+2. El **gateway** la valida contra límites de autoridad y seguridad.
+3. El comando se **registra o simula** (nunca ejecuta).
+4. Un **operador humano** ejecuta o compara manualmente.
+5. **No se mueve hardware.**
+6. Se recopilan **semanas de discrepancias** intención vs. acción segura.
+7. Solo tras **revisión independiente** podría considerarse habilitar una acción **limitada** (con e-stop, kill switch, límites de par/velocidad en firmware y confirmación humana).
+
+### Límites de autoridad, auditoría, e-stop, kill switch
+- Todo comando lleva `safetyLevel`; los peligrosos exigen confirmación humana y quedan auditados.
+- E-stop hardware independiente del software; kill switch por proveedor y por capacidad.
+- Log inmutable revisado tras cada sesión.
