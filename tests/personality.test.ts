@@ -9,11 +9,11 @@ import { buildSelfKnowledgeBlock, SELF_KNOWLEDGE_VERSION } from "@/lib/server/me
 import { readEnv } from "@/lib/server/env";
 
 // El prompt se fija UNA vez por sesión (no por turno): su coste de latencia es
-// marginal. Aun así se mantiene acotado para no desbocarse. v2.2 (persona Helion
-// juvenil-ingeniero + lore + blindaje de identidad) fija el techo en 6.300; la
+// marginal. Aun así se mantiene acotado para no desbocarse. v2.3 (persona +
+// lore + blindaje + bloque de conocimiento base) fija el techo en 6.700; la
 // identidad va desactivada por defecto, así que el prompt real de producción NO
 // lleva bloque de interlocutor.
-const STATIC_BUDGET = 6300;
+const STATIC_BUDGET = 6700;
 const BANNED_IN_EXAMPLES = ["Gran pregunta", "como IA", "En resumen"];
 
 function envFor(extra: Record<string, string> = {}) {
@@ -74,6 +74,13 @@ describe("constitución de voz v2 — personaje robótico", () => {
     expect(text).toContain("Español de España");
     expect(text).toContain("Cuerpo y seguridad");
     expect(text).toContain("robot_gesture");
+  });
+
+  it("incluye el conocimiento base siempre (Ángel Gaitán)", () => {
+    // Va en el prompt de cada sesión, no depende de la memoria.
+    expect(text).toContain("Conocimiento base");
+    expect(text).toContain("Ángel Gaitán");
+    expect(text).toContain("GT Automoción");
   });
 
   it("prohíbe romper personaje (nada de ChatGPT / modelo de lenguaje / asistente genérico)", () => {

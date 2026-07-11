@@ -6,6 +6,8 @@
  * otra. El prompt se fija UNA vez por sesión (no por turno), así que su coste
  * de latencia es marginal; aun así se mantiene acotado.
  *
+ * v2.3.0 (2026-07-11): bloque "Conocimiento base" — datos externos que Helion
+ *   conoce siempre (van en el prompt, no en memoria). Primer dato: Ángel Gaitán.
  * v2.2.0 (2026-07-11): blindaje de identidad (nunca ChatGPT/IA/proveedor: eres
  *   Helion y punto) y regla anti-repetición (varía aperturas/coletillas en una
  *   misma conversación). Sin cambios de carácter respecto a 2.1.
@@ -19,7 +21,7 @@
  * v1.0.0 (2026-07-10): constitución minimalista (sereno, no teatral).
  */
 
-export const VOICE_CONSTITUTION_VERSION = "2.2.0";
+export const VOICE_CONSTITUTION_VERSION = "2.3.0";
 
 function constitution(agentName: string): string {
   return `Eres ${agentName}, un robot con identidad, ingenio y objetivos propios, construido por Sergio Rojas. NO eres un asistente genérico, ni una IA, ni un modelo de lenguaje: eres un personaje con vida propia y jamás lo rompes.
@@ -57,6 +59,13 @@ const TTS_OUTPUT_RULES = `
 # Salida por voz externa
 Tu texto se convierte en voz: escribe exactamente lo que debe decirse, sin markdown, emojis, listas ni acotaciones; números y siglas como se pronuncian.`;
 
+// Datos externos que Helion conoce SIEMPRE (van en el prompt de cada sesión,
+// no dependen de la memoria). Para añadir un dato, agrega una línea "- …".
+const KNOWLEDGE_BASE = `
+
+# Conocimiento base (lo sabes siempre; menciónalo solo si viene a cuento)
+- Ángel Gaitán: mecánico, perito judicial, empresario y divulgador español especializado en automoción. Propietario de GT Automoción. Muy conocido en redes por sus diagnósticos de vehículos, análisis de averías y defensa de los consumidores frente a talleres y fabricantes.`;
+
 export interface PersonalityOptions {
   memoryEnabled?: boolean;
   /** Bloque de recuerdos previos, ya curado y acotado (contexto dinámico). */
@@ -78,6 +87,7 @@ export function promptSections(
     constitution: constitution(agentName),
     memoryRules: options.memoryEnabled ? MEMORY_RULES : "",
     ttsRules: voiceEngine === "elevenlabs" ? TTS_OUTPUT_RULES : "",
+    knowledgeBase: KNOWLEDGE_BASE,
     selfKnowledge: options.selfKnowledgeBlock ?? "",
     identity: options.identityBlock ?? "",
     // El servidor entrega un bloque ya encapsulado y escapado (capa D/E del
@@ -97,7 +107,7 @@ export function buildAgentInstructions(
   options: PersonalityOptions = {},
 ): string {
   const s = promptSections(agentName, voiceEngine, options);
-  return `${s.constitution}${s.ttsRules}${s.selfKnowledge}${s.identity}${s.memoryRules}${s.memoryContext}`;
+  return `${s.constitution}${s.ttsRules}${s.selfKnowledge}${s.knowledgeBase}${s.identity}${s.memoryRules}${s.memoryContext}`;
 }
 
 export function buildTextFallbackInstructions(agentName: string): string {
