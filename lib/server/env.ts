@@ -476,7 +476,10 @@ function readWakeConfig(source: Record<string, string | undefined>): WakeEnv {
     .map((n) => n.trim())
     .filter(Boolean);
   return {
-    mode: parseEnum<"directed" | "open">(source.WAKE_MODE, ["directed", "open"], "directed"),
+    // Por defecto OPEN: Helion responde a la voz detectada (comportamiento
+    // clásico). "directed" (responder solo si se le habla a él) queda como
+    // opt-in experimental — depende mucho de la calidad de la transcripción.
+    mode: parseEnum<"directed" | "open">(source.WAKE_MODE, ["directed", "open"], "open"),
     agentNames: names.length > 0 ? names : ["Helion"],
     requireDirectAddress: parseBoolean(source.WAKE_REQUIRE_DIRECT_ADDRESS, true),
     attentionWindowMs: parseNumber(source.WAKE_ATTENTION_WINDOW_MS, 10_000, 0, 120_000),

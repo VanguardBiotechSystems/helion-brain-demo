@@ -1,5 +1,12 @@
 # Escucha permanente con activación inteligente + consola conversacional
 
+> **Nota (2026-07-11):** el modo `directed` (responder solo si se le habla a
+> Helion) resultó poco fiable en pruebas —depende de la transcripción en vivo—
+> y está **desactivado por defecto**: `WAKE_MODE=open`, Helion responde a la
+> voz detectada como siempre. Lo de abajo describe el modo `directed`, que
+> queda como **opt-in experimental** (`WAKE_MODE=directed`). La consola
+> conversacional (transcript + texto) sigue activa en ambos modos.
+
 Helion deja de responder a cualquier voz detectada y pasa a comportarse como un agente serio: **el micrófono está siempre activo, pero solo responde cuando se le HABLA a él**, no cuando lo mencionan. Además incorpora una consola conversacional con transcript visible y entrada de texto como fallback.
 
 ## Modo «Di "Helion" para hablar»
