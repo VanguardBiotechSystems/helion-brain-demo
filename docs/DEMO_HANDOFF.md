@@ -130,3 +130,8 @@ npm run dev           # prueba local completa (voz, ruido, memoria)
 - **ElevenLabs factura el audio ya solicitado aunque se cancele** (barge-in/apagado cortan la reproducción al instante, pero los caracteres pedidos cuentan); OpenAI factura por tokens de audio/texto de cada sesión. Pon límites de gasto en ambos paneles.
 - La latencia percibida mínima ronda 1–1.5 s en respuestas cortas (silencio VAD + primer token + TTS); el desglose está en el diagnóstico.
 - Las sesiones realtime caducan a ~60 min; al reconectar se pierde el hilo inmediato (la memoria persistente se conserva).
+
+
+## Escucha permanente y consola conversacional
+
+Helion escucha siempre pero **solo responde cuando se le habla a él** (di «Helion»; luego quedas unos segundos en modo atento). No responde a menciones en tercera persona. Si el micrófono falla, escribe en la consola de abajo. Detalle y variables `WAKE_*`/`TRANSCRIPT_*` en [WAKE_AND_TRANSCRIPT.md](WAKE_AND_TRANSCRIPT.md). Voz por defecto: ElevenLabs `r8cXSGtllevsD7FGkMTx`.
