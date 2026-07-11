@@ -129,6 +129,13 @@ export default function HelionApp({
         realtime.error?.code === "mic_lost" ||
         realtime.error?.code === "browser_unsupported"
       }
+      wakeDirected={realtime.wakeDirected}
+      attentive={realtime.attentive}
+      agentNameHint={realtime.agentNameHint}
+      entries={log.entries}
+      sendingText={sendingText}
+      onSendText={handleSendText}
+      uiConfig={realtime.uiConfig}
     />
   );
 }

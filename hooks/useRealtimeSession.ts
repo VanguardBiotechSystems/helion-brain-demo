@@ -218,6 +218,8 @@ export interface RealtimeSession {
   attentive: boolean;
   /** Nombre principal para el hint de UI ("Di 'Helion'…"). */
   agentNameHint: string;
+  /** Config de UI (transcript/entrada de texto), null hasta conectar. */
+  uiConfig: UiClientConfig | null;
   connect(): Promise<void>;
   disconnect(): void;
   restart(): Promise<void>;
@@ -264,6 +266,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   const [orbPulse, setOrbPulse] = useState<{ kind: "heard" | "memory" | "identity"; seq: number } | null>(null);
   // Escucha permanente con activación inteligente (wake / AddressingGate).
   const [attentive, setAttentive] = useState(false);
+  const [uiConfig, setUiConfig] = useState<UiClientConfig | null>(null);
   const wakeConfigRef = useRef<WakeClientConfig | null>(null);
   const uiConfigRef = useRef<UiClientConfig | null>(null);
   const attentiveUntilRef = useRef(0);
@@ -1425,7 +1428,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         sessionStartAtRef.current = performance.now();
         if (session.versions) versionsRef.current = session.versions;
         if (session.wake) wakeConfigRef.current = session.wake;
-        if (session.ui) uiConfigRef.current = session.ui;
+        if (session.ui) {
+          uiConfigRef.current = session.ui;
+          setUiConfig(session.ui);
+        }
         // Degradación de voz por coste: se informa, nunca es silenciosa.
         if (session.voiceDowngraded) {
           logRef.current.addSystem("Voz de calidad no disponible ahora: uso la voz estable.");
@@ -1914,6 +1920,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       wakeDirected: wakeConfigRef.current?.mode === "directed",
       attentive,
       agentNameHint: wakeConfigRef.current?.agentNames[0] ?? "Helion",
+      uiConfig,
       connect,
       disconnect,
       restart,
@@ -1952,6 +1959,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       sessionStats,
       orbPulse,
       attentive,
+      uiConfig,
       connect,
       disconnect,
       restart,

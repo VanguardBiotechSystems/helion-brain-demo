@@ -2,8 +2,9 @@
 
 import { useRef, type RefObject } from "react";
 import type { AppError } from "@/lib/shared/errors";
-import type { AgentStatus, ListenMode } from "@/lib/shared/types";
+import type { AgentStatus, ListenMode, TranscriptEntry, UiClientConfig } from "@/lib/shared/types";
 import HelionOrb, { type OrbPulse } from "./HelionOrb";
+import ConversationConsole from "./ConversationConsole";
 import { statusLabel } from "./ConnectionStatus";
 import { haptic } from "@/lib/client/haptics";
 
@@ -29,6 +30,14 @@ interface MinimalVoiceExperienceProps {
   onAdvanced: () => void;
   orbPulse?: OrbPulse | null;
   micUnavailable?: boolean;
+  // Escucha permanente + consola conversacional.
+  wakeDirected?: boolean;
+  attentive?: boolean;
+  agentNameHint?: string;
+  entries?: TranscriptEntry[];
+  sendingText?: boolean;
+  onSendText?: (text: string) => void | Promise<void>;
+  uiConfig?: UiClientConfig | null;
 }
 
 function minimalErrorMessage(error: AppError): string {
@@ -53,6 +62,13 @@ export default function MinimalVoiceExperience({
   onAdvanced,
   orbPulse = null,
   micUnavailable = false,
+  wakeDirected = false,
+  attentive = false,
+  agentNameHint = "Helion",
+  entries = [],
+  sendingText = false,
+  onSendText,
+  uiConfig = null,
 }: MinimalVoiceExperienceProps) {
   const tapsRef = useRef<number[]>([]);
 
@@ -83,11 +99,21 @@ export default function MinimalVoiceExperience({
   // («Conectando…», «Calibrando…»): la línea de estado calla para no duplicar.
   const buttonCarriesStatus =
     busy || status === "calibrating" || status === "idle" || status === "error";
+  // En modo escucha permanente (wake), el estado no dice "Escuchando" todo el
+  // rato: dice cómo activar a Helion o si está atento tras una llamada.
+  const wakeIdle = isConnected && wakeDirected && !attentive && (status === "standby" || status === "listening" || status === "voice_detected");
   const statusText = buttonCarriesStatus
     ? ""
     : showPtt && !pttActive
       ? "Pulsa y mantén para hablar"
-      : statusLabel(status).replace("…", "");
+      : isConnected && wakeDirected && attentive
+        ? "Atento…"
+        : wakeIdle
+          ? `Di «${agentNameHint}» para hablar`
+          : statusLabel(status).replace("…", "");
+
+  const showConsole =
+    (uiConfig?.transcriptPanelEnabled ?? true) && Boolean(onSendText);
 
   return (
     <div className="min-shell">
@@ -158,6 +184,18 @@ export default function MinimalVoiceExperience({
         <button className="lg-button" onClick={onPower} disabled={busy}>
           {buttonLabel}
         </button>
+      )}
+
+      {showConsole && onSendText && (
+        <ConversationConsole
+          entries={entries}
+          connected={isConnected}
+          sending={sendingText}
+          onSendText={onSendText}
+          defaultOpen={uiConfig?.transcriptDefaultOpen ?? true}
+          showIgnored={uiConfig?.transcriptShowIgnored ?? true}
+          textInputEnabled={uiConfig?.textInputEnabled ?? true}
+        />
       )}
     </div>
   );

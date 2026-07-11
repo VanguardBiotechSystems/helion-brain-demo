@@ -21,12 +21,13 @@ beforeAll(() => {
 afterEach(cleanup);
 
 describe("experiencia pública minimalista", () => {
-  it("solo muestra el orbe, el estado y el botón de encendido", () => {
+  it("muestra el orbe, el botón y la consola conversacional, sin paneles técnicos", () => {
     render(<HelionApp appName="Helion" agentName="Helion" />);
     expect(screen.getByRole("button", { name: /encender helion/i })).toBeTruthy();
-    // Sin chat, sin caja de texto, sin paneles técnicos.
-    expect(screen.queryByText(/conversación/i)).toBeNull();
-    expect(screen.queryByPlaceholderText(/escrib|modo texto/i)).toBeNull();
+    // La consola conversacional (transcript + texto) SÍ existe ahora en público.
+    expect(screen.getByRole("button", { name: /conversación/i })).toBeTruthy();
+    expect(screen.getByPlaceholderText(/escribe a helion/i)).toBeTruthy();
+    // Pero NO los paneles técnicos (diagnóstico/memoria/silenciar) del modo avanzado.
     expect(screen.queryByTitle(/diagnóstico/i)).toBeNull();
     expect(screen.queryByTitle(/^memoria$/i)).toBeNull();
     expect(screen.queryByTitle(/silenciar/i)).toBeNull();
@@ -119,7 +120,8 @@ describe("modo avanzado (oculto)", () => {
     render(<HelionApp appName="Helion" agentName="Helion" initialAdvanced />);
     fireEvent.click(screen.getByTitle(/salir del modo avanzado/i));
     expect(screen.getByRole("button", { name: /encender helion/i })).toBeTruthy();
-    expect(screen.queryByText(/conversación/i)).toBeNull();
+    // De vuelta en minimal: sigue el control de salir del avanzado ausente.
+    expect(screen.queryByTitle(/salir del modo avanzado/i)).toBeNull();
   });
 });
 
@@ -154,5 +156,60 @@ describe("haptics opcionales (bloque 3 §12)", () => {
     // jsdom no implementa navigator.vibrate → no disponible, y haptic() no lanza.
     expect(hapticsAvailable()).toBe(false);
     expect(() => haptic(10)).not.toThrow();
+  });
+});
+
+describe("consola conversacional (wake + texto)", () => {
+  it("muestra transcript de usuario/Helion, marca ignorados y permite escribir", async () => {
+    const { default: ConversationConsole } = await import("@/components/ConversationConsole");
+    const sent: string[] = [];
+    render(
+      <ConversationConsole
+        entries={[
+          { id: "u1", role: "user", text: "Hola Helion", at: Date.now(), inputMode: "voice" },
+          { id: "a1", role: "agent", text: "Estoy aquí.", at: Date.now() },
+          { id: "u2", role: "user", text: "Helion es interesante", at: Date.now(), ignored: true, note: "Mención detectada, no respondida" },
+        ]}
+        connected
+        sending={false}
+        onSendText={(t) => { sent.push(t); }}
+        defaultOpen
+        showIgnored
+        textInputEnabled
+      />,
+    );
+    expect(screen.getByText("Hola Helion")).toBeTruthy();
+    expect(screen.getByText("Estoy aquí.")).toBeTruthy();
+    // Ignorado visible con su nota.
+    expect(screen.getByText(/Mención detectada, no respondida/i)).toBeTruthy();
+    // Enviar por texto.
+    const box = screen.getByPlaceholderText(/escribe a helion/i);
+    fireEvent.change(box, { target: { value: "¿Qué eres?" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(sent).toContain("¿Qué eres?");
+  });
+
+  it("oculta los ignorados si showIgnored=false", async () => {
+    const { default: ConversationConsole } = await import("@/components/ConversationConsole");
+    render(
+      <ConversationConsole
+        entries={[{ id: "u2", role: "user", text: "Helion es interesante", at: Date.now(), ignored: true, note: "Mención" }]}
+        connected
+        sending={false}
+        onSendText={() => {}}
+        defaultOpen
+        showIgnored={false}
+        textInputEnabled
+      />,
+    );
+    expect(screen.queryByText("Helion es interesante")).toBeNull();
+  });
+
+  it("no muestra el input si textInputEnabled=false", async () => {
+    const { default: ConversationConsole } = await import("@/components/ConversationConsole");
+    render(
+      <ConversationConsole entries={[]} connected sending={false} onSendText={() => {}} defaultOpen showIgnored textInputEnabled={false} />,
+    );
+    expect(screen.queryByPlaceholderText(/escribe a helion/i)).toBeNull();
   });
 });
