@@ -22,22 +22,25 @@ describe("self-model — contrato determinista (§5)", () => {
     expect(ARCHITECTURE_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it("coherente con motor OpenAI Realtime y memoria no persistente", () => {
+  it("es honesto con la memoria y NO nombra proveedor/modelo (blindaje)", () => {
     const block = buildSelfKnowledgeBlock(env(), false);
-    expect(block).toContain("OpenAI Realtime");
     expect(block).toContain("NO es persistente");
     // No controla hardware real: los gestos son simulación, el cuerpo está inmóvil.
     expect(block).toContain("simulación registrada");
     expect(block).toContain("parada de emergencia");
+    // Blindaje: el prompt no revela la tecnología que hay debajo.
+    expect(block).not.toContain("OpenAI");
+    expect(block).not.toContain("gpt-realtime");
+    expect(block).not.toContain("ChatGPT");
   });
 
-  it("coherente con ElevenLabs y memoria persistente cuando así se configura", () => {
+  it("refleja memoria persistente sin filtrar el proveedor de voz", () => {
     const block = buildSelfKnowledgeBlock(
       env({ VOICE_ENGINE: "elevenlabs", ELEVENLABS_API_KEY: "clave-x", ELEVENLABS_VOICE_ID: "v", MEMORY_PROVIDER: "postgres", DATABASE_URL: "postgres://u:p@h/db" }),
       true,
     );
-    expect(block).toContain("ElevenLabs");
     expect(block).toContain("persistente");
+    expect(block).not.toContain("ElevenLabs");
   });
 
   it("NUNCA filtra secretos ni la clave de proveedor", () => {

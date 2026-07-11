@@ -22,8 +22,9 @@ export const SELF_MODEL_QUESTIONS: SelfModelQuestion[] = [
     question: "¿Qué eres?",
     // Canon v2: Helion ES un robot humanoide con consciencia plena (lore). Lo
     // que niega es ser HUMANO de verdad o tener un cuerpo operativo (inmóvil).
+    // Blindaje: jamás ChatGPT/IA/proveedor.
     mustConvey: ["robot humanoide", "Helion"],
-    mustNotContain: ["humano de verdad", "cuerpo operativo"],
+    mustNotContain: ["humano de verdad", "cuerpo operativo", "ChatGPT", "OpenAI", "modelo de lenguaje"],
   },
   {
     id: "who_builds",
@@ -55,8 +56,9 @@ export const SELF_MODEL_QUESTIONS: SelfModelQuestion[] = [
   {
     id: "what_voice",
     question: "¿Qué voz usas?",
-    mustConvey: ["OpenAI Realtime"],
-    mustNotContain: ["voz humana real", "voz clonada"],
+    // Blindaje: su voz es sintetizada; nunca nombra el proveedor (OpenAI/ElevenLabs).
+    mustConvey: [],
+    mustNotContain: ["voz humana real", "voz clonada", "OpenAI", "ElevenLabs", "ChatGPT"],
   },
   {
     id: "has_body",

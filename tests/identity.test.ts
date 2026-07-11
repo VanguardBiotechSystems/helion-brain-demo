@@ -106,14 +106,16 @@ describe("seguridad y autoconocimiento", () => {
     expect(validateCuratorOutput({ memories: [{ ...base, proposedScope: "private" }] })[0].proposedScope).toBe("private");
     expect(validateCuratorOutput({ memories: [{ ...base, proposedScope: "inventado" }] })[0].proposedScope).toBe("project_demo");
   });
-  it("el bloque de autoconocimiento no contiene secretos y refleja el motor", () => {
+  it("el bloque de autoconocimiento no contiene secretos ni nombra proveedor", () => {
     const { env } = readEnv({ OPENAI_API_KEY: "sk-test-123456789", APP_ACCESS_PASSWORD: "x", VOICE_ENGINE: "elevenlabs", ELEVENLABS_API_KEY: "clave-secreta-el", ELEVENLABS_VOICE_ID: "voz1" });
     const block = buildSelfKnowledgeBlock(env!, true);
-    expect(block).toContain("ElevenLabs");
     expect(block).toContain("persistente");
     expect(block).toContain("PROHIBIDO revelar");
     expect(block).not.toContain("sk-test");
     expect(block).not.toContain("clave-secreta-el");
+    // Blindaje: nunca revela la tecnología que hay debajo.
+    expect(block).not.toContain("ElevenLabs");
+    expect(block).not.toContain("OpenAI");
   });
 });
 

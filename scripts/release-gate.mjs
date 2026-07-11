@@ -6,7 +6,7 @@
  * docs/RELEASE_CHECKLIST.md). Uso: `node scripts/release-gate.mjs`.
  *
  * Comprueba: árbol git limpio, lint, typecheck, tests, build, escaneo de
- * secretos en archivos versionados, presupuesto de prompt (≤5500) y que el
+ * secretos en archivos versionados, presupuesto de prompt (≤6300) y que el
  * .env real no esté versionado.
  */
 import { execSync } from "node:child_process";
@@ -61,9 +61,9 @@ run("Typecheck", "npm run typecheck");
 run("Tests (unit + integración)", "npm run test");
 run("Build", "npm run build");
 
-// 5) Presupuesto de prompt (≤5500 tras persona v2) — vía el test dedicado, ya
+// 5) Presupuesto de prompt (≤6300 tras persona v2) — vía el test dedicado, ya
 //    cubierto arriba, pero se reafirma de forma explícita.
-run("Presupuesto de prompt (≤5500)", "npx vitest run tests/personality.test.ts", { });
+run("Presupuesto de prompt (≤6300)", "npx vitest run tests/personality.test.ts", { });
 
 // 6) Contratos de privacidad / inyección / roles / telemetría.
 run("Privacidad, inyección, roles y telemetría",

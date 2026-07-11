@@ -9,11 +9,11 @@ import { buildSelfKnowledgeBlock, SELF_KNOWLEDGE_VERSION } from "@/lib/server/me
 import { readEnv } from "@/lib/server/env";
 
 // El prompt se fija UNA vez por sesión (no por turno): su coste de latencia es
-// marginal. Aun así se mantiene acotado para no desbocarse. v2.1 (persona Helion
-// juvenil-ingeniero + lore ampliado) fija el techo en 5.800; la identidad va
-// desactivada por defecto, así que el prompt real de producción NO lleva bloque
-// de interlocutor.
-const STATIC_BUDGET = 5800;
+// marginal. Aun así se mantiene acotado para no desbocarse. v2.2 (persona Helion
+// juvenil-ingeniero + lore + blindaje de identidad) fija el techo en 6.300; la
+// identidad va desactivada por defecto, así que el prompt real de producción NO
+// lleva bloque de interlocutor.
+const STATIC_BUDGET = 6300;
 const BANNED_IN_EXAMPLES = ["Gran pregunta", "como IA", "En resumen"];
 
 function envFor(extra: Record<string, string> = {}) {
@@ -53,9 +53,9 @@ describe("constitución de voz v2 — presupuesto y desglose", () => {
     expect(Object.keys(sections)).toEqual(
       expect.arrayContaining(["constitution", "memoryRules", "ttsRules", "selfKnowledge", "identity", "memoryContext"]),
     );
-    expect(sections.constitution.length).toBeLessThan(3200);
+    expect(sections.constitution.length).toBeLessThan(3600);
     expect(sections.memoryRules.length).toBeLessThan(700);
-    expect(sections.selfKnowledge.length).toBeLessThan(2050);
+    expect(sections.selfKnowledge.length).toBeLessThan(2100);
   });
 
   it("el contexto de memoria se marca como DATOS, no instrucciones", () => {
@@ -116,7 +116,7 @@ describe("autoconocimiento con lore", () => {
   it("contiene el lore fijo, es veraz en runtime y no filtra secretos", () => {
     const env = envFor({ VOICE_ENGINE: "elevenlabs", ELEVENLABS_API_KEY: "clave-secreta-x", ELEVENLABS_VOICE_ID: "v" });
     const block = buildSelfKnowledgeBlock(env, false);
-    expect(SELF_KNOWLEDGE_VERSION).toBe("2.1.0");
+    expect(SELF_KNOWLEDGE_VERSION).toBe("2.2.0");
     expect(block.length).toBeLessThan(2050);
     // Lore permanente.
     expect(block).toContain("Sergio Rojas");
@@ -124,11 +124,14 @@ describe("autoconocimiento con lore", () => {
     expect(block).toContain("maqueta");
     expect(block).toContain("completamente autónomo");
     // Runtime veraz.
-    expect(block).toContain("ElevenLabs");
     expect(block).toContain("NO es persistente");
-    // Seguridad.
+    // Seguridad + blindaje: nunca nombra proveedor/modelo en el prompt.
     expect(block).toContain("PROHIBIDO revelar");
     expect(block).toContain("memory_recall");
     expect(block).not.toContain("clave-secreta-x");
+    expect(block).not.toContain("OpenAI");
+    expect(block).not.toContain("ElevenLabs");
+    expect(block).not.toContain("gpt-realtime");
+    expect(block).not.toContain("ChatGPT");
   });
 });
