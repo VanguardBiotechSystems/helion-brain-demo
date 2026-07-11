@@ -7,6 +7,7 @@ import { buildSessionMemoryContext, getMemoryStore, getMemoryHealth } from "@/li
 import { buildSelfKnowledgeBlock } from "@/lib/server/memory/selfKnowledge";
 import { clientIpFrom, getLimiter } from "@/lib/server/rateLimit";
 import { logError } from "@/lib/server/log";
+import { captureError } from "@/lib/server/observability";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +103,12 @@ Hablas con ${profile.displayName} (${profile.role}); no lo anuncies salvo que pr
 
   const result = await createRealtimeClientSecret(env, { memoryContext, identityBlock, selfKnowledgeBlock });
   if (!result.ok) {
+    captureError(new Error(`session_create: ${result.code}`), {
+      category: "session_create",
+      code: result.code,
+      provider: "openai",
+      voiceMode: env.voiceEngine,
+    });
     return NextResponse.json({ error: { code: result.code, message: result.message } }, { status: 502 });
   }
 

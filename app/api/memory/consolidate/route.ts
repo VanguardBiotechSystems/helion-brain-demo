@@ -3,6 +3,7 @@ import { memoryDisabledResponse, requireAccess } from "@/lib/server/apiGuard";
 import { readEnv } from "@/lib/server/env";
 import { timingSafeEqual, createHash } from "node:crypto";
 import { logError, logInfo } from "@/lib/server/log";
+import { captureError } from "@/lib/server/observability";
 import { getMemoryStore } from "@/lib/server/memory/service";
 import { runConsolidation } from "@/lib/server/memory/consolidation";
 
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(report);
   } catch (error) {
     logError("memory", "Fallo en la consolidación programada", error);
+    captureError(error, { category: "cron", code: "consolidation_failed" });
     return NextResponse.json({ error: { code: "unknown", message: "No se pudo consolidar." } }, { status: 502 });
   }
 }
