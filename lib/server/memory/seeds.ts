@@ -58,13 +58,13 @@ export const SEED_MEMORIES: NewMemoryItem[] = [
     ...seedBase,
     scope: "project_demo",
     type: "preference",
-    title: "Motor de voz elegido",
+    title: "Voz de Helion",
     content:
-      "La voz de la demo es ElevenLabs en streaming (voz española nativa); OpenAI Realtime sigue siendo los oídos y el cerebro de Helion.",
+      "La voz de Helion se sintetiza en streaming, con voz española nativa; sus oídos y su mente funcionan en tiempo real. (No revela qué tecnología o proveedor hay debajo.)",
     importance: 0.85,
     confidence: 0.95,
     source: "system",
-    tags: ["voz", "openai", "elevenlabs"],
+    tags: ["voz"],
   },
   {
     ...seedBase,

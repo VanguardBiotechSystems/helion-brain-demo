@@ -38,6 +38,16 @@ describe("readEnv", () => {
     expect(env!.elevenLabsOutputFormat).toBe("mp3_44100_128");
   });
 
+  it("wake por defecto: directed + simple estricto (ventana atenta 0)", () => {
+    const simple = readEnv(BASE).env!;
+    expect(simple.wake.mode).toBe("directed");
+    expect(simple.wake.wakeStrategy).toBe("simple");
+    expect(simple.wake.attentionWindowMs).toBe(0);
+    // En smart la ventana atenta sí tiene un default de seguimiento.
+    const smart = readEnv({ ...BASE, WAKE_STRATEGY: "smart" }).env!;
+    expect(smart.wake.attentionWindowMs).toBe(10_000);
+  });
+
   it("perfil de audio por defecto: demo_balanced (equilibrado para voz conversacional)", () => {
     const { env } = readEnv(BASE);
     expect(env!.audio.profile).toBe("demo_balanced");

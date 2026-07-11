@@ -485,16 +485,20 @@ function readWakeConfig(source: Record<string, string | undefined>): WakeEnv {
     .split(",")
     .map((n) => n.trim())
     .filter(Boolean);
+  // Por defecto DIRECTED con estrategia SIMPLE: Helion solo responde si dices
+  // su nombre («Helion…»); si no, calla (tipo Alexa). La estrategia simple es
+  // determinista (nombre presente → responde), a diferencia del gate "smart"
+  // que distinguía vocativo/mención y resultó poco fiable en vivo.
+  const wakeStrategy = parseEnum<"simple" | "smart">(source.WAKE_STRATEGY, ["simple", "smart"], "simple");
+  // En simple, la ventana atenta por defecto es 0 (estricto: nombre en CADA
+  // turno). Si es >0, tras llamarle un turno de seguimiento responde sin nombre.
+  const defaultAttentionMs = wakeStrategy === "simple" ? 0 : 10_000;
   return {
-    // Por defecto DIRECTED con estrategia SIMPLE: Helion solo responde si dices
-    // su nombre («Helion…»); si no, calla (tipo Alexa). La estrategia simple es
-    // determinista (nombre presente → responde), a diferencia del gate "smart"
-    // que distinguía vocativo/mención y resultó poco fiable en vivo.
     mode: parseEnum<"directed" | "open">(source.WAKE_MODE, ["directed", "open"], "directed"),
-    wakeStrategy: parseEnum<"simple" | "smart">(source.WAKE_STRATEGY, ["simple", "smart"], "simple"),
+    wakeStrategy,
     agentNames: names.length > 0 ? names : ["Helion"],
     requireDirectAddress: parseBoolean(source.WAKE_REQUIRE_DIRECT_ADDRESS, true),
-    attentionWindowMs: parseNumber(source.WAKE_ATTENTION_WINDOW_MS, 10_000, 0, 120_000),
+    attentionWindowMs: parseNumber(source.WAKE_ATTENTION_WINDOW_MS, defaultAttentionMs, 0, 120_000),
     minConfidence: parseEnum<"high" | "medium" | "low">(source.WAKE_MIN_CONFIDENCE, ["high", "medium", "low"], "medium"),
     respondToMentions: parseBoolean(source.WAKE_RESPOND_TO_MENTIONS, false),
     rulesFirst: parseBoolean(source.WAKE_RULES_FIRST, true),

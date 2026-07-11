@@ -311,6 +311,10 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   const identityRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const speechStoppedAtRef = useRef<number | null>(null);
+  // ¿Helion estaba hablando cuando el usuario empezó a hablar? Se fija en
+  // speech_started (antes de que el estado pase a "listening"/"thinking") para
+  // que el gate detecte el comando de parada ("para/cállate") como barge-in.
+  const wasSpeakingRef = useRef(false);
   const processedCallsRef = useRef(new Set<string>());
   // Motor de voz de la sesión activa y estado del pipeline TTS (elevenlabs).
   const engineRef = useRef<VoiceEngine>("openai_realtime");
@@ -775,7 +779,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         text,
         inputMode,
         attentive: isAttentive(),
-        agentSpeaking: statusRef.current === "speaking",
+        agentSpeaking: statusRef.current === "speaking" || wasSpeakingRef.current,
         config,
       });
       // Ambiguo por reglas → clasificador de modelo (opcional, timeout bajo).
@@ -1124,6 +1128,8 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       switch (event.type) {
         case "input_audio_buffer.speech_started":
           speechStoppedAtRef.current = null;
+          // Captura si Helion hablaba justo antes (para el barge-in por comando).
+          wasSpeakingRef.current = statusRef.current === "speaking";
           // Barge-in: si la voz TTS local está sonando, se corta al hablar.
           stopTtsPlayback();
           setStatusSafe("listening");
@@ -1146,8 +1152,18 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
             const transcript = event.transcript ?? "";
             const itemId = event.item_id;
             const cfg = wakeConfigRef.current;
-            if (!cfg || cfg.mode !== "directed") {
-              // Modo open (o sin config): el modelo responde solo; comportamiento previo.
+            if (!cfg) {
+              // Sin config de wake (transitorio): el servidor por defecto es
+              // directed (create_response=false). Pedimos respuesta de forma
+              // explícita para NO quedar mudos por una desincronización.
+              logRef.current.finalizeUser(itemId, transcript);
+              recordExchange("user", transcript);
+              void maybeInjectMemories(transcript);
+              sendEvent({ type: "response.create" });
+              break;
+            }
+            if (cfg.mode !== "directed") {
+              // Modo open: el modelo responde solo; comportamiento clásico.
               logRef.current.finalizeUser(itemId, transcript);
               recordExchange("user", transcript);
               void maybeInjectMemories(transcript);
@@ -1165,6 +1181,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
                 }
                 // El turno de fondo no debe contaminar el contexto del modelo.
                 sendEvent({ type: "conversation.item.delete", item_id: itemId });
+                // speech_stopped dejó el estado en "thinking"; como Helion NO
+                // responde, vuelve a reposo para no mostrar "Pensando…" colgado.
+                if (statusRef.current === "thinking") setStatusSafe(deriveReadyStatus());
                 return;
               }
               logRef.current.finalizeUser(itemId, transcript);
