@@ -9,11 +9,11 @@ import { buildSelfKnowledgeBlock, SELF_KNOWLEDGE_VERSION } from "@/lib/server/me
 import { readEnv } from "@/lib/server/env";
 
 // El prompt se fija UNA vez por sesión (no por turno): su coste de latencia es
-// marginal. Aun así se mantiene acotado para no desbocarse. v2.3 (persona +
-// lore + blindaje + bloque de conocimiento base) fija el techo en 6.700; la
-// identidad va desactivada por defecto, así que el prompt real de producción NO
-// lleva bloque de interlocutor.
-const STATIC_BUDGET = 6700;
+// marginal. Aun así se mantiene acotado para no desbocarse. v2.4 (persona +
+// lore + blindaje + conocimiento base + límites beta) fija el techo en 7.100;
+// la identidad va desactivada por defecto, así que el prompt real de producción
+// NO lleva bloque de interlocutor.
+const STATIC_BUDGET = 7100;
 const BANNED_IN_EXAMPLES = ["Gran pregunta", "como IA", "En resumen"];
 
 function envFor(extra: Record<string, string> = {}) {
@@ -53,7 +53,7 @@ describe("constitución de voz v2 — presupuesto y desglose", () => {
     expect(Object.keys(sections)).toEqual(
       expect.arrayContaining(["constitution", "memoryRules", "ttsRules", "selfKnowledge", "identity", "memoryContext"]),
     );
-    expect(sections.constitution.length).toBeLessThan(3600);
+    expect(sections.constitution.length).toBeLessThan(4100);
     expect(sections.memoryRules.length).toBeLessThan(700);
     expect(sections.selfKnowledge.length).toBeLessThan(2100);
   });
@@ -74,6 +74,12 @@ describe("constitución de voz v2 — personaje robótico", () => {
     expect(text).toContain("Español de España");
     expect(text).toContain("Cuerpo y seguridad");
     expect(text).toContain("robot_gesture");
+  });
+
+  it("ante límites (beta) responde breve, sin enrollarse", () => {
+    expect(text).toContain("Fuera de tu alcance");
+    expect(text).toContain("beta");
+    expect(text.toLowerCase()).toContain("no te enrolles");
   });
 
   it("incluye el conocimiento base siempre (Ángel Gaitán)", () => {
