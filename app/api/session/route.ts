@@ -100,9 +100,12 @@ export async function POST(request: NextRequest) {
   // confirmar: reconocer con duda, sin abrir lo privado), CONFIRMADO. El
   // bloque lo construye lib/server/identityPrompt.ts (medido por el test de
   // presupuesto contra el código real).
+  // Con la identificación desactivada, Helion NO reconoce a su interlocutor:
+  // habla con cualquiera igual (su deferencia a Sergio vive en su lore, no en
+  // una identidad de sesión). Se omite el bloque de interlocutor por completo.
   const identityStatus = session!.identityStatus as IdentityStatus;
   const pinNote = ownerPinNote(env.identity.requireOwnerPin, env.identity.ownerPin);
-  const identityBlock = buildIdentityBlock(identityStatus, profile, pinNote);
+  const identityBlock = env.identity.enabled ? buildIdentityBlock(identityStatus, profile, pinNote) : "";
   let selfKnowledgeBlock = "";
   if (env.memory.selfKnowledgeEnabled) {
     // getMemoryHealth NO debe volver al camino crítico sin presupuesto: se

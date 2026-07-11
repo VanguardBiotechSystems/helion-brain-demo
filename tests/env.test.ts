@@ -30,7 +30,7 @@ describe("readEnv", () => {
     expect(env!.realtimeModel).toBe("gpt-realtime-2.1");
     expect(env!.realtimeVoice).toBe("cedar");
     expect(env!.transcriptionLanguage).toBe("es");
-    expect(env!.agentName).toBe("Atlas");
+    expect(env!.agentName).toBe("Helion");
     expect(env!.appName).toBe("Helion");
     expect(env!.openaiBaseUrl).toBe("https://api.openai.com");
     expect(env!.voiceEngine).toBe("openai_realtime");

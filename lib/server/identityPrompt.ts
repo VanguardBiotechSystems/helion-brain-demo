@@ -1,6 +1,11 @@
 import type { AccessProfile, IdentityStatus } from "./profiles";
 
 /**
+ * AVISO (2026-07-11): la identificación del interlocutor está DESACTIVADA por
+ * defecto (IDENTITY_ENABLED=false). Helion habla con cualquiera sin reconocer
+ * ni interrogar. Este módulo es código LATENTE: solo se usa si se reactiva la
+ * identidad a propósito. No lo enciendas sin querer volver al interrogatorio.
+ *
  * Construcción del BLOQUE DE INTERLOCUTOR del prompt (bloque 4: extraído del
  * route para que el presupuesto de prompt se mida contra el código real, no
  * contra una cadena fabricada). Tres estados (§7 del bloque 2): DESCONOCIDO,

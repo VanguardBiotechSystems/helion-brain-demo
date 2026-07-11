@@ -447,15 +447,19 @@ export function readEnv(source: Record<string, string | undefined> = process.env
       gatePasscodes: passcodes,
       profiles,
       identity: {
-        enabled: parseBoolean(source.IDENTITY_ENABLED, true),
-        askOnSessionStart: parseBoolean(source.IDENTITY_ASK_ON_SESSION_START, true),
+        // Por defecto DESACTIVADA: Helion habla con cualquiera sin identificar
+        // ni interrogar al interlocutor (su deferencia a Sergio vive en su
+        // personalidad, no en una identidad de sesión). Es también el default
+        // seguro: un deploy sin la variable no reactiva el interrogatorio.
+        enabled: parseBoolean(source.IDENTITY_ENABLED, false),
+        askOnSessionStart: parseBoolean(source.IDENTITY_ASK_ON_SESSION_START, false),
         defaultProfile: source.IDENTITY_DEFAULT_PROFILE?.trim() || "guest",
         requireOwnerPin: parseBoolean(source.IDENTITY_REQUIRE_OWNER_PIN, true),
         ownerPin: source.OWNER_IDENTITY_PIN?.trim() ?? "",
         allowDynamicProfiles: parseBoolean(source.IDENTITY_ALLOW_DYNAMIC_PROFILES, true),
       },
       sessionSecret: source.SESSION_SECRET?.trim() || getProcessFallbackSecret(),
-      agentName: source.AGENT_NAME?.trim() || "Atlas",
+      agentName: source.AGENT_NAME?.trim() || "Helion",
       appName: source.NEXT_PUBLIC_APP_NAME?.trim() || "Helion",
       voiceEngine,
       elevenLabsApiKey: source.ELEVENLABS_API_KEY?.trim() ?? "",
