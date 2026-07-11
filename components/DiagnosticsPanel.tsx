@@ -54,6 +54,21 @@ interface MemoryStatsResponse {
   profiles: Array<{ id: string; displayName: string; role: string; origin: string; status: string; lastUsedAt: string; memoryCount?: number }>;
 }
 
+interface OpsResponse {
+  generatedAt: string;
+  freshness: string;
+  scope: "full" | "tech";
+  rateLimiter: { mode: string; severity: string; message: string; ready: boolean };
+  observabilityConfigured: boolean;
+  memory: { availability: string; provider: string };
+  cron: { lastRunAt: string | null; stale: boolean; durationMs?: number; note?: string };
+  usage: { sessionsToday: number; estimatedCostTodayUsd: number; costModelVersion: string; costAction: string; longSessions: number };
+  telemetry: { rejected: number; days: Array<{ day: string; sessions: number; turns: number; fastResponses: number; interruptionsSucceeded: number; noiseBlocked: number; reconnects: number; fallbacks: number; latencyP50Ms: number | null; latencyP95Ms: number | null; byVoiceMode: Record<string, number>; byEndCode: Record<string, number>; errorsByCategory: Record<string, number> }> };
+  errors: Record<string, number>;
+  security: { rejected: number };
+  rateBlocks?: Record<string, number>;
+}
+
 function countMap(map: Record<string, number>): string {
   const entries = Object.entries(map);
   return entries.length ? entries.map(([k, v]) => `${k}: ${v}`).join(" · ") : "—";
@@ -81,6 +96,7 @@ export default function DiagnosticsPanel({
 }) {
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [memStats, setMemStats] = useState<MemoryStatsResponse | null>(null);
+  const [ops, setOps] = useState<OpsResponse | null>(null);
   const [browserInfo, setBrowserInfo] = useState({ userAgent: "", webrtc: false, online: true });
   const [identity, setIdentity] = useState<{ displayName?: string; role?: string; identityStatus?: string; trustLevel?: string; memoryScopes?: string[]; plane?: string; capabilities?: string[] } | null>(null);
   const [voiceTest, setVoiceTest] = useState<{ state: "idle" | "loading" | "playing" | "error"; message: string }>({
@@ -128,6 +144,10 @@ export default function DiagnosticsPanel({
     fetch("/api/memory/stats")
       .then((r) => (r.ok ? r.json() : null))
       .then((body: MemoryStatsResponse | null) => setMemStats(body))
+      .catch(() => {});
+    fetch("/api/ops")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body: OpsResponse | null) => setOps(body))
       .catch(() => {});
     if (!config) {
       fetch("/api/config")
@@ -263,6 +283,43 @@ export default function DiagnosticsPanel({
             ));
           })()}
         </dl>
+
+        {ops && (
+          <>
+            <h3 className="diag-subtitle">
+              Operación {ops.scope === "tech" ? "(técnico)" : ""}
+            </h3>
+            <p className="diag-note">
+              Datos {ops.freshness}. Generado {new Date(ops.generatedAt).toLocaleString()}.
+            </p>
+            <dl className="diag-grid">
+              <div className="diag-row"><dt>Sesiones hoy</dt><dd>{ops.usage.sessionsToday}{ops.usage.longSessions ? ` · ${ops.usage.longSessions} largas` : ""}</dd></div>
+              <div className="diag-row"><dt>Coste estimado hoy</dt><dd>~{ops.usage.estimatedCostTodayUsd} USD <small>(estimación v{ops.usage.costModelVersion}, no contable)</small></dd></div>
+              <div className="diag-row"><dt>Acción de coste</dt><dd>{ops.usage.costAction}</dd></div>
+              <div className="diag-row"><dt>Memoria</dt><dd>{ops.memory.availability} · {ops.memory.provider}</dd></div>
+              <div className="diag-row"><dt>Rate limiting</dt><dd>{ops.rateLimiter.mode} · {ops.rateLimiter.severity}{ops.rateLimiter.ready ? "" : " · NO LISTO"}</dd></div>
+              <div className="diag-row"><dt>Observabilidad externa</dt><dd>{ops.observabilityConfigured ? "configurada" : "solo-logging"}</dd></div>
+              <div className="diag-row"><dt>Cron consolidación</dt><dd>{ops.cron.lastRunAt ? `${new Date(ops.cron.lastRunAt).toLocaleString()}${ops.cron.durationMs != null ? ` (${ops.cron.durationMs} ms)` : ""}${ops.cron.stale ? " · ATRASADO" : ""}` : (ops.cron.note ?? "sin ejecutar")}</dd></div>
+              <div className="diag-row"><dt>Telemetría rechazada</dt><dd>{ops.telemetry.rejected}</dd></div>
+              <div className="diag-row"><dt>Errores por categoría</dt><dd>{countMap(ops.errors)}</dd></div>
+              <div className="diag-row"><dt>Rechazos de seguridad</dt><dd>{ops.security.rejected}</dd></div>
+              {ops.rateBlocks && <div className="diag-row"><dt>Bloqueos de rate limit</dt><dd>{countMap(ops.rateBlocks)}</dd></div>}
+            </dl>
+            {ops.telemetry.days.length > 0 && (
+              <dl className="diag-grid">
+                {ops.telemetry.days.slice(0, 3).map((d) => (
+                  <div className="diag-row" key={d.day}>
+                    <dt>{d.day}</dt>
+                    <dd>
+                      {d.sessions} ses · {d.turns} turnos · p50 {d.latencyP50Ms ?? "—"}/p95 {d.latencyP95Ms ?? "—"} ms ·
+                      {" "}{d.fastResponses} rápidas · {d.reconnects} reconex · {d.fallbacks} fallbacks · ruido {d.noiseBlocked}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </>
+        )}
 
         {memStats && (
           <>

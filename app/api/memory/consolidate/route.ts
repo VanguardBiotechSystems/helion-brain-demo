@@ -5,7 +5,7 @@ import { timingSafeEqual, createHash } from "node:crypto";
 import { logError, logInfo } from "@/lib/server/log";
 import { captureError } from "@/lib/server/observability";
 import { getMemoryStore } from "@/lib/server/memory/service";
-import { runConsolidation } from "@/lib/server/memory/consolidation";
+import { runConsolidation, recordConsolidationRun } from "@/lib/server/memory/consolidation";
 
 export const dynamic = "force-dynamic";
 
@@ -42,9 +42,12 @@ export async function GET(request: NextRequest) {
   const dryRun = request.nextUrl.searchParams.get("dryRun") === "1";
   try {
     const store = await getMemoryStore(env);
+    const startedAt = Date.now();
     const report = await runConsolidation(store, { dryRun, minIntervalMs: MIN_INTERVAL_MS });
+    const durationMs = Date.now() - startedAt;
+    if (!dryRun) recordConsolidationRun(report, durationMs, new Date(startedAt).toISOString());
     logInfo("memory", `consolidación cron: ${JSON.stringify(report)}`);
-    return NextResponse.json(report);
+    return NextResponse.json({ ...report, durationMs });
   } catch (error) {
     logError("memory", "Fallo en la consolidación programada", error);
     captureError(error, { category: "cron", code: "consolidation_failed" });

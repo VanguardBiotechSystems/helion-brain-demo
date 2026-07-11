@@ -92,7 +92,20 @@ export interface ConsolidationReport {
   at: string;
 }
 
-const runStore = globalThis as unknown as { __helionLastConsolidation?: number };
+const runStore = globalThis as unknown as {
+  __helionLastConsolidation?: number;
+  __helionLastConsolidationReport?: ConsolidationReport & { durationMs: number; ranAt: string };
+};
+
+/** Última ejecución del cron para el panel operativo (§9). */
+export function lastConsolidationReport(): (ConsolidationReport & { durationMs: number; ranAt: string }) | null {
+  return runStore.__helionLastConsolidationReport ?? null;
+}
+
+/** Registra la última ejecución (llamado por la ruta del cron). */
+export function recordConsolidationRun(report: ConsolidationReport, durationMs: number, ranAt: string): void {
+  runStore.__helionLastConsolidationReport = { ...report, durationMs, ranAt };
+}
 
 /**
  * Ejecuta una pasada de consolidación. Idempotente: con `minIntervalMs` no
