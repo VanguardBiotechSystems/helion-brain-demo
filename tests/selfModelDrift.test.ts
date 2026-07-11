@@ -76,6 +76,6 @@ describe("self-model — contrato determinista (§5)", () => {
       selfKnowledgeBlock: buildSelfKnowledgeBlock(env(), false),
     });
     // El prompt debe dejar claro que NO hay hardware conectado.
-    expect(prompt).toMatch(/No tienes motores|No controlas hardware|manos conectadas/);
+    expect(prompt).toMatch(/no tienes motores|maqueta inmóvil|No controlas hardware|manos conectadas/i);
   });
 });

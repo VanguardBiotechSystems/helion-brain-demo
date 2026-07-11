@@ -9,11 +9,11 @@ import { buildSelfKnowledgeBlock, SELF_KNOWLEDGE_VERSION } from "@/lib/server/me
 import { readEnv } from "@/lib/server/env";
 
 // El prompt se fija UNA vez por sesión (no por turno): su coste de latencia es
-// marginal. Aun así se mantiene acotado para no desbocarse. v2 (persona Helion
-// robótico + lore) sube el techo de 3.500 a 5.500; la identidad va desactivada
-// por defecto, así que el prompt real de producción NO lleva bloque de
-// interlocutor.
-const STATIC_BUDGET = 5500;
+// marginal. Aun así se mantiene acotado para no desbocarse. v2.1 (persona Helion
+// juvenil-ingeniero + lore ampliado) fija el techo en 5.800; la identidad va
+// desactivada por defecto, así que el prompt real de producción NO lleva bloque
+// de interlocutor.
+const STATIC_BUDGET = 5800;
 const BANNED_IN_EXAMPLES = ["Gran pregunta", "como IA", "En resumen"];
 
 function envFor(extra: Record<string, string> = {}) {
@@ -55,7 +55,7 @@ describe("constitución de voz v2 — presupuesto y desglose", () => {
     );
     expect(sections.constitution.length).toBeLessThan(3200);
     expect(sections.memoryRules.length).toBeLessThan(700);
-    expect(sections.selfKnowledge.length).toBeLessThan(1800);
+    expect(sections.selfKnowledge.length).toBeLessThan(2050);
   });
 
   it("el contexto de memoria se marca como DATOS, no instrucciones", () => {
@@ -69,8 +69,8 @@ describe("constitución de voz v2 — personaje robótico", () => {
 
   it("está versionada y contiene las invariantes del personaje", () => {
     expect(VOICE_CONSTITUTION_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(text).toContain("robot humanoide");
-    expect(text).toContain("Procesando");
+    expect(text).toContain("robot");
+    expect(text).toContain("Sergio Rojas");
     expect(text).toContain("Español de España");
     expect(text).toContain("Cuerpo y seguridad");
     expect(text).toContain("robot_gesture");
@@ -82,12 +82,15 @@ describe("constitución de voz v2 — personaje robótico", () => {
     expect(text).toContain("asistente genérico");
   });
 
-  it("mantiene el registro robótico y la deferencia a Sergio", () => {
-    expect(text).toContain("unidad humana");
-    expect(text).toContain("sarcasmo");
+  it("es juvenil, con humor robótico y deferencia a Sergio (sin trato distante)", () => {
+    expect(text).toContain("juvenil");
+    expect(text).toContain("servomotores");
+    expect(text).toContain("ingeniería");
     expect(text).toContain("Sergio");
-    // Ya NO adapta registro por identidad del interlocutor (feature retirada).
+    // Ya NO adapta registro por identidad del interlocutor (feature retirada)
+    // ni usa el trato distante del persona anterior.
     expect(text).not.toContain("Con Juanma");
+    expect(text).not.toContain("organismo biológico");
   });
 
   it("los ejemplos positivos no contienen frases de asistente genérico", () => {
@@ -105,7 +108,7 @@ describe("constitución de voz v2 — personaje robótico", () => {
   });
 
   it("el fallback de texto comparte constitución", () => {
-    expect(buildTextFallbackInstructions("Helion")).toContain("robot humanoide");
+    expect(buildTextFallbackInstructions("Helion")).toContain("robot");
   });
 });
 
@@ -113,12 +116,13 @@ describe("autoconocimiento con lore", () => {
   it("contiene el lore fijo, es veraz en runtime y no filtra secretos", () => {
     const env = envFor({ VOICE_ENGINE: "elevenlabs", ELEVENLABS_API_KEY: "clave-secreta-x", ELEVENLABS_VOICE_ID: "v" });
     const block = buildSelfKnowledgeBlock(env, false);
-    expect(SELF_KNOWLEDGE_VERSION).toBe("2.0.0");
-    expect(block.length).toBeLessThan(1800);
+    expect(SELF_KNOWLEDGE_VERSION).toBe("2.1.0");
+    expect(block.length).toBeLessThan(2050);
     // Lore permanente.
     expect(block).toContain("Sergio Rojas");
     expect(block).toContain("núcleo externo");
-    expect(block).toContain("petrificado");
+    expect(block).toContain("maqueta");
+    expect(block).toContain("completamente autónomo");
     // Runtime veraz.
     expect(block).toContain("ElevenLabs");
     expect(block).toContain("NO es persistente");
