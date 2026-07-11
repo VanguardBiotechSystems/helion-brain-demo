@@ -37,6 +37,19 @@ describe("buildRealtimeSessionConfig", () => {
     expect(String(config.instructions)).toContain("voz externa");
   });
 
+  it("en modo directed el servidor NO auto-interrumpe (interrupt_response=false)", () => {
+    // Evita que el ruido/charla de fondo corte a Helion a media frase: la
+    // interrupción la decide el cliente solo si el turno va dirigido.
+    const directed = buildRealtimeSessionConfig(envFor()); // WAKE_MODE por defecto = directed
+    const td = (directed.audio as { input: { turn_detection: { interrupt_response?: boolean; create_response?: boolean } } }).input.turn_detection;
+    expect(td.interrupt_response).toBe(false);
+    expect(td.create_response).toBe(false);
+
+    const open = buildRealtimeSessionConfig(envFor({ WAKE_MODE: "open" }));
+    const tdOpen = (open.audio as { input: { turn_detection: { interrupt_response?: boolean } } }).input.turn_detection;
+    expect(tdOpen.interrupt_response).toBe(true);
+  });
+
   it("la transcripción fija idioma es e incluye la pista de contexto si se configura", () => {
     const base = buildRealtimeSessionConfig(envFor());
     const baseInput = (base.audio as { input: { transcription: Record<string, string> } }).input;

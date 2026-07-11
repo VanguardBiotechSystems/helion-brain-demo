@@ -63,6 +63,11 @@ export function buildRealtimeSessionConfig(
   // debe responder — solo entonces envía response.create. interrupt_response
   // se mantiene para que la voz del usuario corte a Helion (barge-in).
   const autoRespond = env.wake.mode !== "directed";
+  // En modo directed el servidor NO debe interrumpir a Helion cada vez que el
+  // VAD detecta voz (ruido, otra persona, charla de fondo): eso lo cortaba a
+  // media frase aunque no se le hablara a él. La interrupción la decide el
+  // CLIENTE: solo corta si el turno va dirigido ("Helion…") o es un "para".
+  const serverInterrupt = autoRespond;
   const turnDetection =
     audioCfg.turnDetection === "server_vad"
       ? {
@@ -71,13 +76,13 @@ export function buildRealtimeSessionConfig(
           prefix_padding_ms: audioCfg.vadPrefixPaddingMs,
           silence_duration_ms: vadSilenceMs,
           create_response: autoRespond,
-          interrupt_response: true,
+          interrupt_response: serverInterrupt,
         }
       : {
           type: "semantic_vad",
           eagerness: audioCfg.vadEagerness,
           create_response: autoRespond,
-          interrupt_response: true,
+          interrupt_response: serverInterrupt,
         };
 
   const transcription: Record<string, string> = { model: env.transcriptionModel };

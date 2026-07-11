@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERROR_COPY, toAppError, type AppError, type ErrorCode } from "@/lib/shared/errors";
 import { sendTelemetry } from "@/lib/client/telemetry";
-import { evaluateAddressing, containsWakeName, type AddressingDecision, type WakeConfig } from "@/lib/wake/addressingGate";
+import { evaluateAddressing, containsWakeName, normalizeWake, type AddressingDecision, type WakeConfig } from "@/lib/wake/addressingGate";
 import type { SessionEndCode } from "@/lib/shared/telemetry";
 import type {
   AgentStatus,
@@ -319,6 +319,11 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
   // onset ("Helion") que la transcripción final reescribe/pierde. Se usa como
   // red para no perder la activación por nombre.
   const partialBufferRef = useRef(new Map<string, string>());
+  // Texto que Helion está diciendo AHORA (se acumula por deltas). Con el micro
+  // siempre abierto, su propia voz puede colarse por el altavoz y transcribirse;
+  // si el turno entrante coincide con lo que Helion acaba de decir, es ECO y se
+  // descarta (evita que se auto-active o se auto-interrumpa).
+  const lastAgentTextRef = useRef("");
   const processedCallsRef = useRef(new Set<string>());
   // Motor de voz de la sesión activa y estado del pipeline TTS (elevenlabs).
   const engineRef = useRef<VoiceEngine>("openai_realtime");
@@ -759,6 +764,15 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
 
   const isAttentive = useCallback(() => performance.now() < attentiveUntilRef.current, []);
 
+  // ¿El turno entrante es ECO de la propia voz de Helion? Si lo que se transcribe
+  // está contenido en lo que Helion acaba de decir, se descarta (anti auto-eco).
+  const isLikelyEcho = useCallback((userText: string): boolean => {
+    const u = normalizeWake(userText);
+    if (u.length < 8) return false; // demasiado corto para afirmarlo con certeza
+    const a = normalizeWake(lastAgentTextRef.current);
+    return a.length > 0 && a.includes(u);
+  }, []);
+
   /**
    * Decide si un turno va DIRIGIDO a Helion. Reglas primero; para casos
    * "uncertain" consulta el clasificador de modelo con timeout bajo y
@@ -1131,20 +1145,34 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       setEventCount((count) => count + 1);
 
       switch (event.type) {
-        case "input_audio_buffer.speech_started":
+        case "input_audio_buffer.speech_started": {
           speechStoppedAtRef.current = null;
-          // Captura si Helion hablaba justo antes (para el barge-in por comando).
-          wasSpeakingRef.current = statusRef.current === "speaking";
-          // Barge-in: si la voz TTS local está sonando, se corta al hablar.
+          const directedNow = wakeConfigRef.current?.mode === "directed";
+          const helionResponding = ttsGenRef.current !== null || statusRef.current === "speaking";
+          // Captura si Helion hablaba justo antes (para el comando de parada).
+          wasSpeakingRef.current = statusRef.current === "speaking" || helionResponding;
+          if (directedNow && helionResponding) {
+            // Helion está hablando y estamos en modo directed: NO le cortes por
+            // ruido/charla de fondo. Se decidirá al transcribir el turno: solo
+            // se interrumpe si va dirigido ("Helion…") o es un "para".
+            break;
+          }
+          // Resto de casos (open/PTT, o Helion en reposo): barge-in normal.
           stopTtsPlayback();
           setStatusSafe("listening");
           break;
+        }
 
-        case "input_audio_buffer.speech_stopped":
+        case "input_audio_buffer.speech_stopped": {
           speechStoppedAtRef.current = performance.now();
           firePulse("heard"); // "te he oído": evento semántico real, <150 ms
+          const directedTalking =
+            wakeConfigRef.current?.mode === "directed" &&
+            (ttsGenRef.current !== null || statusRef.current === "speaking");
+          if (directedTalking) break; // sigue "speaking"; no pases a "thinking"
           setStatusSafe("thinking");
           break;
+        }
 
         case "conversation.item.input_audio_transcription.delta":
           if (event.item_id && typeof event.delta === "string") {
@@ -1195,6 +1223,19 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
               ) {
                 decision = { ...decision, shouldRespond: true, mode: "direct_address", reason: "nombre en transcripción parcial", cleanedUserText: transcript };
               }
+              // Mientras Helion habla, un turno "atento" (sin nombre) NO le corta
+              // por ruido/charla —la ventana atenta solo vale cuando calla— y su
+              // propio ECO se descarta. Solo su nombre explícito o un comando le
+              // interrumpen mientras habla.
+              const helionTalking = ttsGenRef.current !== null || statusRef.current === "speaking";
+              if (helionTalking && decision.shouldRespond && (decision.mode === "attentive" || isLikelyEcho(transcript))) {
+                decision = {
+                  ...decision,
+                  shouldRespond: false,
+                  mode: "background",
+                  reason: decision.mode === "attentive" ? "atento, pero Helion habla" : "eco de la propia voz",
+                };
+              }
               if (!decision.shouldRespond) {
                 // NO dirigido: sin memoria, sin respuesta. Transcript pasivo opcional.
                 if (uiConfigRef.current?.transcriptShowIgnored && cfg.allowBackgroundTranscript) {
@@ -1205,9 +1246,9 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
                 }
                 // El turno de fondo no debe contaminar el contexto del modelo.
                 sendEvent({ type: "conversation.item.delete", item_id: itemId });
-                // speech_stopped dejó el estado en "thinking"; como Helion NO
-                // responde, vuelve a reposo para no mostrar "Pensando…" colgado.
-                if (statusRef.current === "thinking") setStatusSafe(deriveReadyStatus());
+                // Vuelve a reposo si estaba en "thinking" por este turno; pero NO
+                // si Helion sigue generando/hablando su propia respuesta.
+                if (statusRef.current === "thinking" && ttsGenRef.current === null) setStatusSafe(deriveReadyStatus());
                 return;
               }
               logRef.current.finalizeUser(itemId, transcript);
@@ -1217,15 +1258,21 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
                 if (/apag[aá]|ap[aá]gate/.test(norm)) {
                   disconnectRef.current();
                 } else {
+                  // "para/cállate": corta y calla. NO abre ventana atenta (si no,
+                  // la siguiente voz de fondo lo reactivaría). Exige el nombre otra vez.
                   cancelActiveResponse();
                   if (statusRef.current === "speaking" || statusRef.current === "thinking") setStatusSafe(deriveReadyStatus());
-                  openAttention();
                 }
                 sendEvent({ type: "conversation.item.delete", item_id: itemId });
                 return;
               }
-              // Dirigido: registra, inyecta memoria y PIDE respuesta (create_response
-              // está desactivado en el servidor para modo directed).
+              // Dirigido: AHORA sí se interrumpe si Helion estaba hablando (el
+              // barge-in solo ocurre cuando se le habla a él, no por ruido).
+              if (ttsGenRef.current !== null || statusRef.current === "speaking") {
+                cancelActiveResponse();
+              }
+              // Registra, inyecta memoria y PIDE respuesta (create_response está
+              // desactivado en el servidor para modo directed).
               recordExchange("user", decision.cleanedUserText || transcript);
               void maybeInjectMemories(decision.cleanedUserText || transcript);
               openAttention();
@@ -1236,6 +1283,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
 
         case "response.created":
           setStatusSafe("thinking");
+          lastAgentTextRef.current = ""; // nueva respuesta: reinicia el buffer anti-eco
           if (event.response?.id) {
             logRef.current.startAgent(event.response.id);
             // Modo elevenlabs streaming: arranca la generación TTS y las métricas.
@@ -1281,6 +1329,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         }
           if (event.response_id && typeof event.delta === "string") {
             logRef.current.appendAgent(event.response_id, event.delta);
+            lastAgentTextRef.current = (lastAgentTextRef.current + " " + event.delta).slice(-1200);
           }
           break;
 
@@ -1298,6 +1347,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
         case "response.output_text.delta":
           if (event.response_id && typeof event.delta === "string") {
             logRef.current.appendAgent(event.response_id, event.delta);
+            lastAgentTextRef.current = (lastAgentTextRef.current + " " + event.delta).slice(-1200);
             textBufferRef.current.set(
               event.response_id,
               (textBufferRef.current.get(event.response_id) ?? "") + event.delta,
@@ -1437,6 +1487,7 @@ export function useRealtimeSession(log: ConversationLog): RealtimeSession {
       evaluateTurn,
       firePulse,
       handleFunctionCall,
+      isLikelyEcho,
       maybeExtractMemory,
       maybeInjectMemories,
       openAttention,
